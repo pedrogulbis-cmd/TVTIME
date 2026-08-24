@@ -305,9 +305,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.6.0";
+const VERSION = "1.7.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.7.0", d:"2026-08-24", t:"Import BetaSeries", l:[
+    "Nouvelle section : l'export BetaSeries se reprend depuis son .zip ou depuis les deux CSV sélectionnés ensemble.",
+    "Les épisodes vus arrivent avec leurs dates réelles, et les séries archivées sur BetaSeries le restent dans Antenne.",
+    "Une série sans détail épisode par épisode est reconstituée à partir du dernier épisode vu déclaré.",
+    "Correspondance par titre avec repli sur le titre sans année, puis sur une recherche large.",
+    "Les séries sans aucun épisode vu arrivent en « À voir » plutôt qu'en « En cours »."
+  ]},
   { v:"1.6.0", d:"2026-08-24", t:"Compteur de revisionnage", l:[
     "Ma liste indique combien de fois une série a été vue en entier, à côté du temps restant et du pourcentage.",
     "Quand la série n'a pas été refaite en entier, le compteur indique le nombre d'épisodes revus.",
@@ -1244,6 +1251,23 @@ function vueReglages(){
       '<button class="btn sm dgr hide" id="imp-stop" data-act="stop-import">Interrompre</button></div>' +
     '<div class="log hide" id="imp-log"></div></div>' +
 
+  '<div class="eyebrow">Reprendre BetaSeries</div>' +
+  '<div class="box"><h3>Importer l\'export BetaSeries</h3>' +
+    '<p class="note">Depuis BetaSeries : Membre → Préférences → Exporter mes données. ' +
+    'Dépose le <b>.zip</b>, ou sélectionne les deux CSV ensemble : ' +
+    '<span class="mono">series-*.csv</span> pour la liste et l\'archivage, ' +
+    '<span class="mono">episodes-*.csv</span> pour les épisodes vus et leurs dates.</p>' +
+    '<p class="note" style="margin-top:7px">Cet export ne contient pas d\'identifiant TVDB : la correspondance se fait sur le titre, ' +
+    'avec plusieurs tentatives dont le titre sans son année. Les séries introuvables sont listées à la fin. ' +
+    'Il ne contient pas non plus les revisionnages — chaque épisode y figure une seule fois.</p>' +
+    '<label class="btn full pri" style="margin-top:11px">Choisir le ZIP ou les deux CSV' +
+      '<input type="file" accept=".zip,.csv,application/zip,text/csv" multiple id="f-bs" class="hide"></label>' +
+    '<div class="pgt hide" id="bs-bar"><i></i></div>' +
+    '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
+      '<div class="mono" id="bs-etat" style="font-size:11px;color:var(--gris);flex:1"></div>' +
+      '<button class="btn sm dgr hide" id="bs-stop" data-act="stop-import">Interrompre</button></div>' +
+    '<div class="log hide" id="bs-log"></div></div>' +
+
   '<div class="box" style="margin-top:9px"><h3>Importer une liste de titres</h3>' +
     '<p class="note">Un titre par ligne. Les séries sont ajoutées en « À voir », sans épisode coché.</p>' +
     '<textarea id="ta-list" rows="4" placeholder="Severance&#10;The Bear&#10;Andor"></textarea>' +
@@ -1626,30 +1650,31 @@ async function extraire(e){
 
 /* ---------- affichage de la progression ---------- */
 const impr = {
-  ouvert:false,
-  ouvrir(){
-    const bar = $("#imp-bar"), log = $("#imp-log"), stop = $("#imp-stop");
+  ouvert:false, p:"imp",
+  ouvrir(prefixe){
+    if(prefixe) this.p = prefixe;
+    const bar = $("#" + this.p + "-bar"), log = $("#" + this.p + "-log"), stop = $("#" + this.p + "-stop");
     if(bar) bar.classList.remove("hide");
     if(log){ log.classList.remove("hide"); if(!this.ouvert) log.textContent = ""; }
     if(stop) stop.classList.remove("hide");
     if(!this.ouvert){ state.annuler = false; this.ouvert = true; }
   },
-  dire(m){ const l = $("#imp-log"); if(l){ l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; } },
+  dire(m){ const l = $("#" + this.p + "-log"); if(l){ l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; } },
   avance(fait, total, reste){
-    const b = $("#imp-bar");
+    const b = $("#" + this.p + "-bar");
     if(b) b.firstElementChild.style.width = Math.round(fait / Math.max(1, total) * 100) + "%";
-    const t = $("#imp-etat");
+    const t = $("#" + this.p + "-etat");
     if(t) t.textContent = fait + " / " + total + (reste != null ? " · encore " + dureeLongue(Math.ceil(reste / 60)) : "");
   },
-  fermer(){ this.ouvert = false; const s2 = $("#imp-stop"); if(s2) s2.classList.add("hide");
-            const t = $("#imp-etat"); if(t) t.textContent = ""; }
+  fermer(){ this.ouvert = false; const s2 = $("#" + this.p + "-stop"); if(s2) s2.classList.add("hide");
+            const t = $("#" + this.p + "-etat"); if(t) t.textContent = ""; }
 };
 
 /* ---------- aiguillage ---------- */
 const estTVTime = tete => tete.includes("key") && tete.includes("series_name") && tete.includes("s_id");
 
 async function importerFichier(f){
-  impr.ouvrir();
+  impr.ouvrir("imp");
   try{
     if(/\.zip$/i.test(f.name)){
       impr.dire("Ouverture de l'archive " + f.name + "…");
@@ -1669,7 +1694,7 @@ async function importerFichier(f){
 }
 
 async function importerCSV(txt){
-  impr.ouvrir();
+  impr.ouvrir("imp");
   const rows = parseCSV(txt);
   if(rows.length < 2){ impr.dire("Fichier vide ou illisible."); return impr.fermer(); }
   const tete = rows[0].map(h => h.toLowerCase().trim().replace(/^"|"$/g, ""));
@@ -1777,6 +1802,158 @@ async function importerTVTime(rows, tete){
   impr.avance(total, total);
   impr.dire("\nTerminé : " + ok + " séries, " + coches + " épisodes, " + revus + " revisionnages, " + arch + " archivées." +
     (rates.length ? "\nNon retrouvées (" + rates.length + ") : " + rates.slice(0, 20).join(", ") + (rates.length > 20 ? "…" : "") : ""));
+  impr.fermer();
+  toast(ok + " séries importées");
+  majQuota();
+}
+
+/* ============================================================
+   BetaSeries — deux fichiers complémentaires
+   series-*.csv   : id, title, archive, episode (dernier vu), remaining, status
+   episodes-*.csv : id, show, episode (SxxEyy), title, date, note
+   Pas d'identifiant TVDB ici : la correspondance se fait sur le titre, avec
+   plusieurs tentatives. Pas de revisionnage dans cet export non plus, chaque
+   épisode n'y figure qu'une fois.
+   ============================================================ */
+const estBSseries  = t => t.includes("title") && t.includes("archive") && t.includes("remaining");
+const estBSepisode = t => t.includes("show") && t.includes("episode") && t.includes("date");
+const lireSE = v => {
+  const m = /^S(\d+)E(\d+)$/i.exec(String(v || "").trim());
+  if(!m) return null;
+  const se = { s:+m[1], n:+m[2] };
+  return se.s === 0 && se.n === 0 ? null : se;   // S00E00 = rien de vu
+};
+
+async function importerBS(fichiers){
+  impr.ouvrir("bs");
+  try{
+    const csvs = [];
+    for(const f of fichiers){
+      if(/\.zip$/i.test(f.name)){
+        impr.dire("Ouverture de " + f.name + "…");
+        const zip = await lireZip(await f.arrayBuffer());
+        for(const [nom, e] of zip) if(/\.csv$/i.test(nom)) csvs.push({ nom, txt:await extraire(e) });
+      }else{
+        csvs.push({ nom:f.name, txt:await f.text() });
+      }
+    }
+    let rSeries = null, rEpisodes = null;
+    for(const c of csvs){
+      const rows = parseCSV(c.txt);
+      if(rows.length < 2) continue;
+      const tete = rows[0].map(h => h.toLowerCase().trim());
+      if(estBSseries(tete))       { rSeries = { rows, tete };   impr.dire("Séries : " + c.nom + " (" + (rows.length - 1) + " lignes)"); }
+      else if(estBSepisode(tete)) { rEpisodes = { rows, tete }; impr.dire("Épisodes : " + c.nom + " (" + (rows.length - 1) + " lignes)"); }
+    }
+    if(!rSeries && !rEpisodes){
+      impr.dire("Aucun fichier BetaSeries reconnu. Attendu : series-*.csv et episodes-*.csv.");
+      return impr.fermer();
+    }
+    return importerBetaSeries(rSeries, rEpisodes);
+  }catch(e){
+    impr.dire("Échec : " + (e && e.message || e));
+    impr.fermer();
+  }
+}
+
+/* Correspondance par titre, du plus précis au plus large. */
+async function trouverParTitre(titre){
+  const nu = titre.replace(/\s*\((19|20)\d{2}\)\s*$/, "").trim();
+  for(const t of (nu && nu !== titre ? [titre, nu] : [titre])){
+    const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(t) + "&embed=episodes");
+    if(r){ const sh = normShow(r); sh.eps = normEps(r._embedded && r._embedded.episodes); return sh; }
+  }
+  const res = await net.get(API + "/search/shows?q=" + encodeURIComponent(nu || titre));
+  if(res && res.length){
+    const cible = norm(nu || titre);
+    const m = res.find(x => norm(x.show.name) === cible);
+    if(m) return await fetchShow(m.show.id);
+  }
+  return null;
+}
+
+async function importerBetaSeries(rSeries, rEpisodes){
+  const series = new Map();   // titre → { titre, archive, dernier }
+  const vusPar = new Map();   // titre → Map("s-n" → date)
+
+  if(rSeries){
+    const c = k => rSeries.tete.indexOf(k);
+    const iT = c("title"), iA = c("archive"), iE = c("episode");
+    rSeries.rows.slice(1).forEach(r => {
+      const titre = String(r[iT] || "").trim();
+      if(!titre) return;
+      series.set(titre, { titre, archive:String(r[iA]).trim() === "1", dernier:lireSE(r[iE]) });
+    });
+  }
+  if(rEpisodes){
+    const c = k => rEpisodes.tete.indexOf(k);
+    const iS = c("show"), iE = c("episode"), iD = c("date");
+    rEpisodes.rows.slice(1).forEach(r => {
+      const titre = String(r[iS] || "").trim();
+      const se = lireSE(r[iE]);
+      if(!titre || !se) return;
+      if(!series.has(titre)) series.set(titre, { titre, archive:false, dernier:null });
+      if(!vusPar.has(titre)) vusPar.set(titre, new Map());
+      vusPar.get(titre).set(se.s + "-" + se.n, r[iD] || null);
+    });
+  }
+
+  const total = series.size;
+  const nbEp = [...vusPar.values()].reduce((t, m) => t + m.size, 0);
+  impr.dire("\n" + total + " séries et " + nbEp + " épisodes vus à reprendre.");
+  impr.dire("Correspondance par titre — compte environ " + dureeLongue(Math.ceil(total * 0.6 / 60)) +
+            ". Laisse cet onglet ouvert.\n");
+
+  let ok = 0, coches = 0, arch = 0, deduits = 0;
+  const rates = []; let i = 0;
+  for(const s of series.values()){
+    if(state.annuler){ impr.dire("\nInterrompu. Les " + ok + " premières séries sont enregistrées."); break; }
+    i++; impr.avance(i, total, (total - i) * 0.6);
+    try{
+      let sh = Object.values(DB.shows).find(x => norm(x.name) === norm(s.titre));
+      if(!sh) sh = await trouverParTitre(s.titre);
+      if(!sh){ rates.push(s.titre); impr.dire("✗ " + s.titre); continue; }
+
+      if(!DB.shows[sh.id]) ajouterShow(sh, "watching");
+      const cible = DB.shows[sh.id];
+      const liste = vusPar.get(s.titre);
+      let c2 = 0, mode = "";
+
+      if(liste && liste.size){
+        liste.forEach((d, k) => {
+          const [se, ep] = k.split("-").map(Number);
+          const e = (cible.eps || []).find(x => x.s === se && x.n === ep);
+          if(!e || vues(e).length) return;
+          const t = d ? new Date(String(d).replace(" ", "T") + "Z") : null;
+          poser(e, [t && !isNaN(t) ? t.toISOString() : new Date().toISOString()]);
+          c2++;
+        });
+      }else if(s.dernier){
+        // Pas de détail épisode par épisode : on se fie au dernier vu déclaré.
+        const eps = epsOf(cible);
+        const fin = eps.findIndex(e => e.s === s.dernier.s && e.n === s.dernier.n);
+        if(fin >= 0){
+          eps.slice(0, fin + 1).filter(diffuse).forEach(e => { if(!vues(e).length){ poser(e, [new Date().toISOString()]); c2++; } });
+          mode = " (déduit du dernier épisode vu)";
+          deduits++;
+        }
+      }
+
+      cible.archive = !!s.archive;
+      if(s.archive) arch++;
+      if(!c2 && !avancement(cible).watched) cible.userStatus = "planned";
+      autoStatut(cible); sauverShow(cible);
+      coches += c2; ok++;
+      impr.dire("✓ " + cible.name + (c2 ? "  " + c2 + " épisodes" : "  rien de vu") + mode + (s.archive ? "  [archivée]" : ""));
+    }catch(e){
+      rates.push(s.titre);
+      impr.dire("✗ " + s.titre + " (" + (e && e.message || e) + ")");
+    }
+  }
+  impr.avance(total, total);
+  impr.dire("\nTerminé : " + ok + " séries, " + coches + " épisodes, " + arch + " archivées" +
+    (deduits ? ", " + deduits + " déduites du dernier épisode" : "") + "." +
+    (rates.length ? "\nNon retrouvées (" + rates.length + ") : " + rates.slice(0, 25).join(", ") + (rates.length > 25 ? "…" : "") : ""));
   impr.fermer();
   toast(ok + " séries importées");
   majQuota();
@@ -1925,6 +2102,7 @@ document.addEventListener("change", ev => {
     rd.readAsText(f);
   }
   if(ev.target.id === "f-csv"){ importerFichier(f); ev.target.value = ""; return; }
+  if(ev.target.id === "f-bs"){ importerBS([...ev.target.files]); ev.target.value = ""; return; }
   ev.target.value = "";
 });
 
