@@ -305,9 +305,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.8.1";
+const VERSION = "1.8.2";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.8.2", d:"2026-08-24", t:"Retour à la bonne place", l:[
+    "Le tri Diffusion reprend la première place dans la rangée de tris.",
+    "En revenant d'une fiche où l'on a coché des épisodes, la liste cadre la série concernée là où elle est allée.",
+    "Fonctionne quel que soit le tri : la série remonte en tête en Diffusion et en Reprise, et garde sa place en A → Z ou par date d'ajout."
+  ]},
   { v:"1.8.1", d:"2026-08-24", t:"Réglages de liste mémorisés", l:[
     "Le tri et le filtre choisis dans Ma liste sont retenus d'une session à l'autre.",
     "Sans choix de ta part, la liste s'ouvre sur le tri par date de diffusion.",
@@ -723,9 +728,23 @@ function activiteDe(sh){
 function toucher(sh){
   if(!sh) return;
   sh.activite = Date.now();
-  // En tri par reprise, la série vient de passer en tête de liste : il faut
-  // aussi la ramener en haut de l'écran, sinon elle remonte hors de vue.
-  if(state.tri === "activite"){ state.limite = PAGE; state.retour = 0; state.remonter = true; }
+  // La série vient probablement de changer de rang. On la marque pour la
+  // retrouver à l'écran en revenant sur la liste, quel que soit le tri :
+  // remonter aveuglément en haut ferait perdre sa place aux tris qui, eux,
+  // ne bougent pas (A → Z, Ajout).
+  state.vise = sh.id;
+  state.limite = PAGE;
+}
+/* Amène à l'écran la carte de la dernière série touchée. */
+function viser(){
+  if(!state.vise) return false;
+  const id = state.vise; state.vise = null;
+  const el = document.querySelector('[data-act="open"][data-id="' + id + '"]');
+  if(!el) return false;
+  const carte = el.closest(".card") || el;
+  const y = carte.getBoundingClientRect().top + window.scrollY - 100;
+  window.scrollTo(0, y < 140 ? 0 : y);
+  return true;
 }
 function revuTexte(sh){
   const t = tours(sh), r = episodesRevus(sh);
@@ -779,7 +798,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                saisons:null, animer:false, retour:0, remonter:false, journal:false, neuf:false, annuler:false,
+                saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60, limiteS:60,
                 quota:null, durable:false };
 const PAGE = 60;
@@ -811,10 +830,7 @@ function render(){
 
   const neuf = document.querySelector(".sheet");
   if(neuf && posSheet) neuf.scrollTop = posSheet;
-  if(state.remonter && state.tab === "library" && !state.detail){
-    state.remonter = false;
-    window.scrollTo(0, 0);
-  }else if(window.scrollY !== posPage) window.scrollTo(0, posPage);
+  if(window.scrollY !== posPage) window.scrollTo(0, posPage);
   requestAnimationFrame(() => { vueEl.style.minHeight = ""; });
 }
 
@@ -1043,7 +1059,7 @@ function vueListe(){
     '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
 
   const tris = '<div class="chips" style="margin-top:6px">' +
-    [["activite","Reprise"],["recent","Diffusion"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
+    [["recent","Diffusion"],["activite","Reprise"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
       .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
 
   /* --- corps --- */
@@ -1384,7 +1400,7 @@ document.addEventListener("click", async ev => {
 
   if(act === "tab"){
     state.cherche = false;
-    if(state.tab !== id){ state.limiteS = PAGE; state.limite = PAGE; }
+    if(state.tab !== id){ state.limiteS = PAGE; state.limite = PAGE; state.vise = null; }
     state.tab = id; render(); window.scrollTo(0, 0); return;
   }
   if(act === "changelog"){
@@ -1553,9 +1569,9 @@ function ouvrirFiche(id){
 window.addEventListener("popstate", () => {
   if(state.detail){
     state.detail = null;
-    const remonte = state.remonter;
     render();
-    if(!remonte) window.scrollTo(0, state.retour || 0);
+    // Retour sur la liste : on cadre la série qu'on vient de modifier.
+    if(!(state.tab === "library" && viser())) window.scrollTo(0, state.retour || 0);
   }
 });
 
