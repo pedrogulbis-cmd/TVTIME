@@ -58,6 +58,18 @@ header.top{
   font-size:17px;letter-spacing:.14em;text-transform:uppercase}
 .mark svg{display:block}
 .top-sp{flex:1}
+.ver{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;color:var(--gris);
+  border:1px solid var(--trait);background:var(--carte);border-radius:6px;padding:2px 6px;align-self:center}
+.ver.neuf{color:var(--signal);border-color:rgba(255,122,69,.45);background:rgba(255,122,69,.1)}
+.cl{border-top:1px solid var(--trait);padding:11px 0}
+.cl:first-of-type{border-top:0;padding-top:2px}
+.cl-h{display:flex;align-items:baseline;gap:9px}
+.cl-v{font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:600}
+.cl-d{font-family:"IBM Plex Mono",monospace;font-size:10px;color:var(--gris);letter-spacing:.08em}
+.cl-t{font-size:12.5px;color:var(--gris);margin-left:auto}
+.cl ul{margin:7px 0 0;padding-left:17px}
+.cl li{font-size:13px;line-height:1.55;margin-bottom:3px}
+.cl li::marker{color:var(--signal)}
 .iconbtn{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
   background:var(--carte);border:1px solid var(--trait);color:var(--papier)}
 .iconbtn:active{background:var(--carte2)}
@@ -100,6 +112,13 @@ nav.tabs{
   padding:1px 6px;border-radius:5px;display:inline-block}
 .code.next{background:rgba(255,122,69,.14);border-color:rgba(255,122,69,.42);color:var(--signal)}
 .code.vu{background:rgba(126,224,184,.12);border-color:rgba(126,224,184,.35);color:var(--vu)}
+.code.pass{background:rgba(255,122,69,.12);border-color:rgba(255,122,69,.38);color:var(--signal)}
+.xn{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--vu);
+  background:rgba(126,224,184,.12);border:1px solid rgba(126,224,184,.3);border-radius:5px;
+  padding:0 5px;flex:0 0 auto}
+.plus1{width:30px;height:30px;border-radius:8px;flex:0 0 30px;display:grid;place-items:center;
+  color:var(--vu);border:1px solid rgba(126,224,184,.3);font-family:"IBM Plex Mono",monospace;
+  font-size:11px;font-weight:600}
 
 /* ------------ SIGNATURE : la grille de diffusion ------------- */
 .strip{display:flex;gap:1.5px;height:7px;margin-top:9px;border-radius:2px;overflow:hidden}
@@ -107,6 +126,7 @@ nav.tabs{
 .strip i.a{background:#4a3f5e}                 /* diffusé, pas vu */
 .strip i.w{background:var(--vu)}               /* vu */
 .strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,#4a3f5e 50% 100%)} /* partiel */
+.strip i.r{background:#3f6b5c}                 /* vu lors d'un passage précédent */
 .strip i.f{background:#2e2740}                 /* à venir */
 .stripmeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;
   font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);letter-spacing:.03em}
@@ -228,6 +248,7 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
       </svg>
       Antenne
     </div>
+    <button class="ver" id="ver-chip" data-act="changelog" title="Voir les nouveautés"></button>
     <div class="top-sp"></div>
     <button class="iconbtn" data-act="go-search" aria-label="Rechercher une série">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
@@ -253,6 +274,33 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
 
 const API = "https://api.tvmaze.com";
 const LS  = "antenne.v1";
+
+/* ---------- version de l'application ----------
+   VERSION  : ce que tu lis dans l'entête et dans les sauvegardes.
+   SCHEMA   : structure des données. À incrémenter seulement quand
+              le format change et qu'une migration est nécessaire.
+   Pour publier une version : incrémente VERSION et ajoute une entrée
+   en tête de JOURNAL. Rien d'autre à toucher.                        */
+const VERSION = "1.1.0";
+const SCHEMA  = 2;
+const JOURNAL = [
+  { v:"1.1.0", d:"2026-08-24", t:"Revisionnage", l:[
+    "Un épisode garde la liste datée de tous ses visionnages, plus un simple vu / pas vu.",
+    "Bouton « Revoir depuis le début » : la série repart à S01E01 sans effacer l'historique.",
+    "Badge ×N sur les épisodes revus et bouton +1 pour compter un visionnage isolé.",
+    "Bouton « Annuler le passage » pour revenir en arrière proprement.",
+    "Statistiques refondues : visionnages, épisodes distincts, revisionnages.",
+    "Grille de diffusion à quatre états, dont « déjà vu, à revoir ».",
+    "Filtre Revisionnage dans Ma liste, colonne view_no à l'export CSV.",
+    "Import CSV : un épisode répété sur plusieurs lignes compte pour autant de visionnages."
+  ]},
+  { v:"1.0.0", d:"2026-08-24", t:"Première version", l:[
+    "À suivre, Ma liste, Agenda, Stats, fiche série saison par saison.",
+    "Catalogue et dates de diffusion via TVmaze, sans clé ni compte.",
+    "Export JSON et CSV, import de sauvegarde, import CSV TV Time, import d'une liste de titres.",
+    "Tout est stocké dans le navigateur, rien n'est envoyé ailleurs."
+  ]}
+];
 
 /* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
@@ -316,7 +364,8 @@ const net = (() => {
 })();
 
 /* ---------- stockage ---------- */
-const DEFAULTS = { version:1, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false }, meta:{ created:Date.now() } };
+const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false },
+                   meta:{ created:Date.now(), vue:null } };
 let DB = charger();
 
 function charger(){
@@ -324,7 +373,13 @@ function charger(){
     const raw = localStorage.getItem(LS);
     if(raw){
       const d = JSON.parse(raw);
-      return { ...DEFAULTS, ...d, settings:{ ...DEFAULTS.settings, ...(d.settings||{}) }, shows:d.shows||{}, watched:d.watched||{} };
+      const w = d.watched || {};
+      // v1 : une date par épisode  →  v2 : liste de visionnages
+      Object.keys(w).forEach(k => { if(!Array.isArray(w[k])) w[k] = w[k] ? [w[k]] : []; if(!w[k].length) delete w[k]; });
+      Object.values(d.shows || {}).forEach(sh => { if(!sh.pass) sh.pass = 1; });
+      d.version = SCHEMA;
+      return { ...DEFAULTS, ...d, settings:{ ...DEFAULTS.settings, ...(d.settings||{}) },
+               meta:{ ...DEFAULTS.meta, ...(d.meta||{}) }, shows:d.shows||{}, watched:w };
     }
   }catch(e){ console.warn("lecture localStorage", e); }
   return JSON.parse(JSON.stringify(DEFAULTS));
@@ -372,6 +427,7 @@ function ajouterShow(sh, statut){
   DB.shows[sh.id] = {
     ...sh,
     userStatus: statut || old.userStatus || "watching",
+    pass: old.pass || 1,
     favorite: old.favorite || false,
     addedAt: old.addedAt || Date.now(),
     lastFetched: Date.now()
@@ -386,30 +442,52 @@ function retirerShow(id){
 }
 const epsOf = sh => (sh.eps || []).filter(e => DB.settings.specials || !e.sp);
 const diffuse = e => !!e.d && e.d <= todayISO();
-const vu = e => !!DB.watched[e.i];
 
+/* Un épisode garde la liste datée de tous ses visionnages.
+   Une série a un « passage » courant : au 2e visionnage, il faut 2 dates
+   pour qu'un épisode compte comme vu dans ce passage. */
+const vues   = e => { const v = DB.watched[e.i]; return Array.isArray(v) ? v : (v ? [v] : []); };
+const nbVues = e => vues(e).length;
+const passe  = sh => sh.pass || 1;
+const vu     = (e, sh) => nbVues(e) >= passe(sh);
+const dejaVu = e => nbVues(e) > 0;
+
+function poser(ep, liste){
+  if(liste && liste.length) DB.watched[ep.i] = liste;
+  else delete DB.watched[ep.i];
+}
 function avancement(sh){
   const eps = epsOf(sh);
   const air = eps.filter(diffuse);
-  const w = eps.filter(vu);
+  const w = eps.filter(e => vu(e, sh));
   return { total:eps.length, aired:air.length, watched:w.length,
            pct: air.length ? Math.round(w.filter(diffuse).length / air.length * 100) : 0 };
 }
-function prochainAVoir(sh){ return epsOf(sh).find(e => diffuse(e) && !vu(e)) || null; }
+function prochainAVoir(sh){ return epsOf(sh).find(e => diffuse(e) && !vu(e, sh)) || null; }
 function prochaineDiffusion(sh){ return epsOf(sh).find(e => e.d && e.d > todayISO()) || null; }
 function tempsVu(sh){
-  return epsOf(sh).filter(vu).reduce((t, e) => t + (e.r || sh.runtime || 42), 0);
+  return epsOf(sh).reduce((t, e) => t + nbVues(e) * (e.r || sh.runtime || 42), 0);
 }
-function marquer(ep, on){
-  if(on) DB.watched[ep.i] = new Date().toISOString();
-  else delete DB.watched[ep.i];
-  sauver();
+function marquer(ep, sh, on){
+  const v = vues(ep).slice();
+  if(on){ if(v.length < passe(sh)) v.push(new Date().toISOString()); }
+  else  { if(v.length >= passe(sh)) v.pop(); }
+  poser(ep, v); sauver();
+}
+function revoirEpisode(ep){
+  const v = vues(ep).slice(); v.push(new Date().toISOString()); poser(ep, v); sauver();
 }
 function marquerJusqua(sh, ep){
   const eps = epsOf(sh);
   const idx = eps.findIndex(e => e.i === ep.i);
-  eps.slice(0, idx + 1).filter(diffuse).forEach(e => { if(!vu(e)) DB.watched[e.i] = new Date().toISOString(); });
+  eps.slice(0, idx + 1).filter(diffuse).forEach(e => marquer(e, sh, true));
   sauver();
+}
+function nouveauPassage(sh){ sh.pass = passe(sh) + 1; sauver(); }
+function annulerPassage(sh){
+  if(passe(sh) <= 1) return;
+  epsOf(sh).forEach(e => { const v = vues(e).slice(); if(v.length >= passe(sh)) v.pop(); poser(e, v); });
+  sh.pass = passe(sh) - 1; sauver();
 }
 function autoStatut(sh){
   const a = avancement(sh);
@@ -431,7 +509,8 @@ const ICO = {
 const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICO[k] + '</svg>';
 
 /* ---------- état de navigation ---------- */
-const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false, saison:null };
+const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
+                saison:null, journal:false, neuf:false };
 
 const TABS = [
   { id:"upnext",  l:"À suivre", i:"play" },
@@ -453,6 +532,9 @@ function render(){
       '<span>' + t.l + '</span></button>';
   }).join("");
 
+  const chip = $("#ver-chip");
+  if(chip){ chip.textContent = "v" + VERSION; chip.classList.toggle("neuf", state.neuf); }
+
   const v = $("#view");
   if(state.cherche)               v.innerHTML = vueRecherche();
   else if(state.tab === "upnext")   v.innerHTML = vueASuivre();
@@ -470,15 +552,17 @@ function bande(sh){
   const eps = epsOf(sh);
   if(!eps.length) return "";
   const MAX = 92;
-  const etat = eps.map(e => vu(e) ? 2 : (diffuse(e) ? 1 : 0));
+  // 3 = vu dans ce passage · 2 = vu avant, à revoir · 1 = diffusé jamais vu · 0 = à venir
+  const etat = eps.map(e => vu(e, sh) ? 3 : (dejaVu(e) ? 2 : (diffuse(e) ? 1 : 0)));
+  const cl = x => x === 3 ? "w" : x === 2 ? "r" : x === 1 ? "a" : "f";
   let cells;
-  if(etat.length <= MAX) cells = etat.map(x => x === 2 ? "w" : x === 1 ? "a" : "f");
+  if(etat.length <= MAX) cells = etat.map(cl);
   else{
     const k = Math.ceil(etat.length / MAX); cells = [];
     for(let i = 0; i < etat.length; i += k){
       const c = etat.slice(i, i + k);
-      const w = c.filter(x => x === 2).length;
-      cells.push(w === c.length ? "w" : w ? "p" : (c.some(x => x === 1) ? "a" : "f"));
+      const w = c.filter(x => x === 3).length;
+      cells.push(w === c.length ? "w" : w ? "p" : cl(Math.max.apply(null, c)));
     }
   }
   return '<div class="strip" aria-hidden="true">' + cells.map(c => '<i class="' + c + '"></i>').join("") + '</div>';
@@ -495,11 +579,12 @@ function affiche(sh, cls){
 function carteSerie(sh){
   const a = avancement(sh);
   const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
+  const pp = passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "";
   let ligne;
-  if(nx) ligne = '<span class="code next">S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span> ' + esc(nx.t || "");
-  else if(up) ligne = 'À jour · retour ' + relDate(up.d);
-  else if(a.total && a.watched === a.total) ligne = 'Terminée';
-  else ligne = 'À jour';
+  if(nx) ligne = pp + '<span class="code next">S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span> ' + esc(nx.t || "");
+  else if(up) ligne = pp + 'À jour · retour ' + relDate(up.d);
+  else if(a.total && a.watched === a.total) ligne = pp + 'Terminée';
+  else ligne = pp + 'À jour';
   return '<button class="card row" data-act="open" data-id="' + sh.id + '">' +
     affiche(sh) +
     '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
@@ -549,14 +634,15 @@ function carteEpisode(sh, ep){
 
 /* ---------- vue : Ma liste ---------- */
 const FILTRES = [
-  { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"late", l:"En retard" },
+  { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
   { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
   { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }
 ];
 function vueListe(){
   let l = Object.values(DB.shows);
   const f = state.filtre;
-  if(f === "late")      l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
+  if(f === "rewatch")   l = l.filter(sh => passe(sh) > 1);
+  else if(f === "late") l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
   else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
   else if(f !== "all")  l = l.filter(sh => sh.userStatus === f);
 
@@ -625,16 +711,24 @@ function vueStats(){
   if(!shows.length) return '<div class="empty" style="padding-top:60px"><h3>Pas encore de statistiques</h3>' +
     '<p>Elles apparaîtront dès tes premiers épisodes cochés.</p></div>';
 
-  let mins = 0, nbVus = 0;
+  let mins = 0, total = 0, distincts = 0;
   const parSerie = [];
-  shows.forEach(sh => { const m = tempsVu(sh); const n = epsOf(sh).filter(vu).length;
-    mins += m; nbVus += n; if(n) parSerie.push({ n:sh.name, m, e:n }); });
+  shows.forEach(sh => {
+    const m = tempsVu(sh);
+    const eps = epsOf(sh);
+    const t = eps.reduce((x, e) => x + nbVues(e), 0);
+    const d = eps.filter(dejaVu).length;
+    mins += m; total += t; distincts += d;
+    if(t) parSerie.push({ n:sh.name, m, e:t });
+  });
   parSerie.sort((a, b) => b.m - a.m);
   const finies = shows.filter(sh => sh.userStatus === "completed").length;
+  const revus = shows.filter(sh => passe(sh) > 1).length;
 
   const cartes = [
-    [nbVus, "épisodes vus"], [dureeLongue(mins), "temps d'écran"],
-    [shows.length, "séries suivies"], [finies, "séries terminées"]
+    [total, "visionnages"], [dureeLongue(mins), "temps d'écran"],
+    [distincts, "épisodes distincts"], [total - distincts, "revisionnages"],
+    [shows.length, "séries suivies"], [finies + " / " + revus, "finies / revues"]
   ].map(([n, l]) => '<div class="stat"><div class="n">' + esc(n) + '</div><div class="l">' + l + '</div></div>').join("");
 
   // activité 12 mois
@@ -643,7 +737,8 @@ function vueStats(){
   for(let i = 11; i >= 0; i--){ const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     mois.push({ k:d.getFullYear() + "-" + p2(d.getMonth()+1), l:MOIS[d.getMonth()][0].toUpperCase(), v:0 }); }
   const idx = Object.fromEntries(mois.map((m, i) => [m.k, i]));
-  Object.values(DB.watched).forEach(ts => { const k = String(ts).slice(0, 7); if(k in idx) mois[idx[k]].v++; });
+  Object.values(DB.watched).forEach(v => (Array.isArray(v) ? v : [v]).forEach(ts => {
+    const k = String(ts).slice(0, 7); if(k in idx) mois[idx[k]].v++; }));
   const maxM = Math.max(1, ...mois.map(m => m.v));
   const spark = '<div class="spark">' + mois.map(m =>
     '<div class="' + (m.v === maxM && m.v ? "hot" : "") + '" style="height:' + Math.max(3, m.v / maxM * 100) + '%" title="' + m.v + '"></div>').join("") + '</div>' +
@@ -695,12 +790,13 @@ function vueFiche(sh){
   if(!sh) return "";
   const a = avancement(sh);
   const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
+  const P = passe(sh);
   const saisons = [...new Set(epsOf(sh).map(e => e.s))].sort((x, y) => x - y);
   const ouverte = state.saison != null ? state.saison : (nx ? nx.s : saisons[saisons.length - 1]);
 
   const blocsSaisons = saisons.map(s => {
     const eps = epsOf(sh).filter(e => e.s === s);
-    const w = eps.filter(vu).length;
+    const w = eps.filter(e => vu(e, sh)).length;
     const tous = w === eps.length;
     return '<details class="season" ' + (s === ouverte ? "open" : "") + '>' +
       '<summary><h3>' + (s === 0 ? "Spéciaux" : "Saison " + s) + '</h3>' +
@@ -708,13 +804,17 @@ function vueFiche(sh){
       '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
       (tous ? "Tout décocher" : "Tout cocher") + '</span></summary>' +
       eps.map(e => {
-        const w2 = vu(e);
+        const w2 = vu(e, sh), nv = nbVues(e);
+        const der = nv ? vues(e)[nv - 1] : null;
         return '<div class="ep ' + (w2 ? "done" : "") + '">' +
           '<span class="code ' + (w2 ? "vu" : "") + '" style="flex:0 0 auto">S' + p2(e.s) + 'E' + p2(e.n || 0) + '</span>' +
           '<div class="info" style="min-width:0"><div class="t">' + esc(e.t || "Épisode") + '</div>' +
-          '<div class="mono" style="font-size:10.5px;color:var(--gris)">' + (e.d ? frDate(e.d) : "date inconnue") +
+          '<div class="mono" style="font-size:10.5px;color:var(--gris)">' +
+          (der ? "vu le " + frDate(String(der).slice(0, 10)) : (e.d ? frDate(e.d) : "date inconnue")) +
           (e.r ? " · " + e.r + " min" : "") + '</div></div>' +
-          (!w2 && diffuse(e) ? '<button class="upto" data-act="upto" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Marquer vu jusqu\'ici" aria-label="Marquer vu jusqu\'ici">' + svg("down", 15) + '</button>' : "") +
+          (nv > 1 ? '<span class="xn" title="' + nv + ' visionnages">&times;' + nv + '</span>' : "") +
+          (w2 ? '<button class="plus1" data-act="again" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Compter un visionnage de plus" aria-label="Compter un visionnage de plus">+1</button>'
+              : (diffuse(e) ? '<button class="upto" data-act="upto" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Marquer vu jusqu\'ici" aria-label="Marquer vu jusqu\'ici">' + svg("down", 15) + '</button>' : "")) +
           '<button class="epchk ' + (w2 ? "on" : "") + '" data-act="tick" data-id="' + sh.id + '" data-ep="' + e.i + '" aria-label="Marquer vu">' + svg("check", 17) + '</button>' +
           '</div>';
       }).join("") + '</details>';
@@ -732,7 +832,8 @@ function vueFiche(sh){
         .filter(Boolean).map(esc).join(" · ") + '</div>' +
       bande(sh) +
       '<div class="stripmeta"><span>' + a.watched + '/' + a.total + ' épisodes</span><span>' + a.pct + ' % vus</span></div>' +
-      '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage</div>' +
+      '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage' +
+      (P > 1 ? ' · <span style="color:var(--signal)">passage ' + P + '</span>' : "") + '</div>' +
       '</div></div>' +
       (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
         svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>'
@@ -743,6 +844,14 @@ function vueFiche(sh){
       '<div class="eyebrow">Statut</div>' +
       '<div class="seg">' + STATUTS.map(([id, l]) =>
         '<button class="' + (sh.userStatus === id ? "on" : "") + '" data-act="statut" data-id="' + sh.id + '" data-v="' + id + '">' + l + '</button>').join("") + '</div>' +
+      '<div class="eyebrow">Revisionnage</div>' +
+      '<div class="box"><p class="note">' + (P > 1
+        ? 'Tu en es au passage ' + P + '. Les épisodes se décochent à chaque nouveau passage et chaque visionnage reste compté dans tes statistiques.'
+        : 'Repartir de S01E01 sans rien perdre : les épisodes se décochent, l\'historique et le temps d\'écran restent.') + '</p>' +
+        '<div class="grid2" style="margin-top:11px">' +
+          '<button class="btn" data-act="rewatch" data-id="' + sh.id + '">Revoir depuis le début</button>' +
+          (P > 1 ? '<button class="btn dgr" data-act="unwatch" data-id="' + sh.id + '">Annuler le passage ' + P + '</button>' : '<span></span>') +
+        '</div></div>' +
       (sh.summary ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(sh.summary) + '</p>' : "") +
       '<div class="eyebrow">Épisodes <b>' + a.total + '</b></div>' +
       '<div class="stack">' + blocsSaisons + '</div>' +
@@ -756,7 +865,8 @@ function vueFiche(sh){
 
 /* ---------- vue : Réglages ---------- */
 function vueReglages(){
-  const n = Object.keys(DB.shows).length, e = Object.keys(DB.watched).length;
+  const n = Object.keys(DB.shows).length;
+  const e = Object.values(DB.watched).reduce((t, v) => t + (Array.isArray(v) ? v.length : 1), 0);
   return '<div class="eyebrow">Sauvegarde</div>' +
   '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, épisodes vus, statuts. Garde-la, c\'est ton seul filet.</p>' +
     '<div class="grid2" style="margin-top:11px">' +
@@ -771,7 +881,8 @@ function vueReglages(){
   '<div class="eyebrow">Reprendre TV Time</div>' +
   '<div class="box"><h3>Importer un CSV</h3>' +
     '<p class="note">Depuis TV Time : Profil → Paramètres → demande d\'export de tes données (RGPD). Dépose ici le fichier des épisodes vus. ' +
-    'Les colonnes reconnues : nom de série, saison, épisode, et si présent l\'identifiant TVDB. Chaque série est retrouvée dans TVmaze puis les épisodes correspondants sont cochés.</p>' +
+    'Les colonnes reconnues : nom de série, saison, épisode, et si présent l\'identifiant TVDB. Chaque série est retrouvée dans TVmaze puis les épisodes correspondants sont cochés. ' +
+    'Un même épisode présent sur plusieurs lignes compte pour autant de visionnages.</p>' +
     '<label class="btn full pri" style="margin-top:11px">Choisir un fichier CSV' +
       '<input type="file" accept=".csv,text/csv,text/plain" id="f-csv" class="hide"></label>' +
     '<div class="pgt hide" id="imp-bar"><i></i></div><div class="log hide" id="imp-log"></div></div>' +
@@ -790,13 +901,30 @@ function vueReglages(){
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + '</div><div class="l">séries</div></div>' +
-      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">épisodes vus</div></div>' +
+      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">visionnages</div></div>' +
     '</div>' +
     '<p class="note" style="margin-top:11px">Stockage occupé : ' + (poids() / 1024).toFixed(0) + ' Ko sur ~5 Mo disponibles. Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
     '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button>' +
     '<button class="btn full dgr" style="margin-top:9px" data-act="wipe">Effacer toutes les données</button></div>' +
 
-  '<p class="note" style="text-align:center;margin:22px 0 6px">Antenne · données séries fournies par TVmaze</p>';
+  '<div class="eyebrow" id="anc-journal">Version</div>' +
+  '<div class="box"><div style="display:flex;align-items:baseline;gap:10px">' +
+      '<div class="cl-v" style="font-size:19px;color:var(--signal)">v' + VERSION + '</div>' +
+      '<div class="cl-d">' + JOURNAL[0].d.split("-").reverse().join(".") + '</div>' +
+      '<div class="cl-t">' + JOURNAL[0].t + '</div></div>' +
+    '<p class="note" style="margin-top:7px">Format des données : schéma ' + SCHEMA + '. ' +
+      'Les sauvegardes portent leur numéro de version et se migrent toutes seules à l\'ouverture.</p>' +
+    '<details class="season" style="margin-top:11px;background:transparent;border-color:var(--trait)" ' + (state.journal ? "open" : "") + ' data-journal>' +
+      '<summary><h3>Journal des versions</h3>' +
+        '<span class="mono" style="font-size:11px;color:var(--gris)">' + JOURNAL.length + '</span></summary>' +
+      '<div style="padding:11px">' + JOURNAL.map(e =>
+        '<div class="cl"><div class="cl-h"><span class="cl-v">v' + e.v + '</span>' +
+        '<span class="cl-d">' + e.d.split("-").reverse().join(".") + '</span>' +
+        '<span class="cl-t">' + esc(e.t) + '</span></div>' +
+        '<ul>' + e.l.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul></div>').join("") +
+      '</div></details></div>' +
+
+  '<p class="note" style="text-align:center;margin:22px 0 6px">Antenne v' + VERSION + ' · données séries fournies par TVmaze</p>';
 }
 
 /* ============================================================
@@ -808,6 +936,12 @@ document.addEventListener("click", async ev => {
   const act = el.dataset.act, id = el.dataset.id;
 
   if(act === "tab"){ state.cherche = false; state.tab = id; render(); window.scrollTo(0, 0); return; }
+  if(act === "changelog"){
+    state.cherche = false; state.tab = "reglages"; state.journal = true; state.neuf = false;
+    DB.meta.vue = VERSION; sauver(); render();
+    setTimeout(() => { const a = $("#anc-journal"); if(a) a.scrollIntoView({ behavior:"smooth", block:"start" }); }, 60);
+    return;
+  }
   if(act === "go-search"){ state.cherche = true; render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return; }
   if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; render(); return; }
   if(act === "filtre"){ state.filtre = id; render(); return; }
@@ -816,12 +950,13 @@ document.addEventListener("click", async ev => {
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "close-sheet"){ history.back(); return; }
 
-  if(act === "tick" || act === "upto"){
+  if(act === "tick" || act === "upto" || act === "again"){
     ev.preventDefault();
     const sh = DB.shows[+id]; if(!sh) return;
     const ep = (sh.eps || []).find(x => x.i === +el.dataset.ep); if(!ep) return;
     if(act === "upto"){ marquerJusqua(sh, ep); toast("Épisodes précédents marqués vus"); }
-    else marquer(ep, !vu(ep));
+    else if(act === "again"){ revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté"); }
+    else marquer(ep, sh, !vu(ep, sh));
     if(state.detail) state.saison = ep.s;
     autoStatut(sh); sauver();
     const y = window.scrollY; render(); window.scrollTo(0, y);
@@ -830,7 +965,7 @@ document.addEventListener("click", async ev => {
   if(act === "season"){
     ev.preventDefault();
     const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
-    epsOf(sh).filter(e => e.s === s).forEach(e => { if(on) DB.watched[e.i] = new Date().toISOString(); else delete DB.watched[e.i]; });
+    epsOf(sh).filter(e => e.s === s).forEach(e => marquer(e, sh, on));
     autoStatut(sh); sauver(); state.saison = s; render();
     return;
   }
@@ -842,6 +977,19 @@ document.addEventListener("click", async ev => {
   if(act === "remove"){
     if(!confirm("Retirer « " + DB.shows[+id].name + " » et ses épisodes cochés ?")) return;
     retirerShow(+id); state.detail = null; render(); history.back(); toast("Série retirée"); return;
+  }
+  if(act === "rewatch"){
+    const sh = DB.shows[+id];
+    if(!avancement(sh).watched) return toast("Coche d'abord quelques épisodes");
+    nouveauPassage(sh); state.saison = null; render();
+    toast("Passage " + passe(sh) + " — c'est reparti du début");
+    return;
+  }
+  if(act === "unwatch"){
+    const sh = DB.shows[+id];
+    if(!confirm("Annuler le passage " + passe(sh) + " ? Les visionnages enregistrés pendant ce passage seront retirés des statistiques.")) return;
+    annulerPassage(sh); state.saison = null; render(); toast("Passage annulé");
+    return;
   }
   if(act === "refresh-one"){
     el.textContent = "…";
@@ -888,6 +1036,14 @@ window.addEventListener("popstate", () => {
   if(state.detail){ state.detail = null; render(); }
 });
 
+document.addEventListener("toggle", ev => {
+  if(ev.target.hasAttribute && ev.target.hasAttribute("data-journal")){
+    state.journal = ev.target.open;
+    if(ev.target.open && state.neuf){ state.neuf = false; DB.meta.vue = VERSION; sauver();
+      const c = $("#ver-chip"); if(c) c.classList.remove("neuf"); }
+  }
+}, true);
+
 /* ---------- recherche live ---------- */
 let _q;
 document.addEventListener("input", ev => {
@@ -923,18 +1079,20 @@ function telecharger(nom, contenu, type){
   setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 800);
 }
 function exportJSON(){
-  telecharger("antenne-" + todayISO() + ".json", JSON.stringify({ ...DB, exportedAt:new Date().toISOString(), app:"antenne" }, null, 1));
-  toast("Sauvegarde exportée");
+  telecharger("antenne-v" + VERSION + "-" + todayISO() + ".json",
+    JSON.stringify({ ...DB, app:"antenne", appVersion:VERSION, schema:SCHEMA, exportedAt:new Date().toISOString() }, null, 1));
+  toast("Sauvegarde v" + VERSION + " exportée");
 }
 function exportCSV(){
-  const l = ['show_name,tvmaze_id,season,episode,episode_name,airdate,watched_at'];
+  const l = ['show_name,tvmaze_id,season,episode,episode_name,airdate,watched_at,view_no'];
   Object.values(DB.shows).forEach(sh => (sh.eps || []).forEach(e => {
-    if(!DB.watched[e.i]) return;
-    l.push([sh.name, sh.id, e.s, e.n || "", e.t, e.d || "", DB.watched[e.i]]
-      .map(v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"').join(","));
+    vues(e).forEach((d, k) => {
+      l.push([sh.name, sh.id, e.s, e.n || "", e.t, e.d || "", d, k + 1]
+        .map(v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"').join(","));
+    });
   }));
-  telecharger("antenne-episodes-" + todayISO() + ".csv", l.join("\n"), "text/csv;charset=utf-8");
-  toast(l.length - 1 + " épisodes exportés");
+  telecharger("antenne-v" + VERSION + "-episodes-" + todayISO() + ".csv", l.join("\n"), "text/csv;charset=utf-8");
+  toast(l.length - 1 + " visionnages exportés");
 }
 
 /* ---------- CSV : lecture ---------- */
@@ -1018,17 +1176,29 @@ async function importerCSV(txt){
       if(!sh){ rates.push(etiquette); dire("✗ " + etiquette); continue; }
       if(!DB.shows[sh.id]) ajouterShow(sh, "watching");
       const cible = DB.shows[sh.id];
-      let c = 0;
-      g.eps.forEach(x => {
-        const ep = (cible.eps || []).find(e => e.s === x.s && e.n === x.n);
-        if(ep && !DB.watched[ep.i]){
-          const d = x.d && !isNaN(new Date(x.d)) ? new Date(x.d).toISOString() : new Date().toISOString();
-          DB.watched[ep.i] = d; c++;
+      let c = 0, rw = 0;
+      // plusieurs lignes pour le même épisode = autant de visionnages
+      const paquet = new Map();
+      g.eps.forEach(x => { const k = x.s + "-" + x.n;
+        if(!paquet.has(k)) paquet.set(k, []); paquet.get(k).push(x.d); });
+      paquet.forEach((dates, k) => {
+        const [s2, n2] = k.split("-").map(Number);
+        const ep = (cible.eps || []).find(e => e.s === s2 && e.n === n2);
+        if(!ep) return;
+        const avant = vues(ep).length;
+        const cur = vues(ep).slice();
+        while(cur.length < dates.length){
+          const d = dates[cur.length];
+          cur.push(d && !isNaN(new Date(d)) ? new Date(d).toISOString() : new Date().toISOString());
         }
+        if(cur.length > avant){ c++; rw += Math.max(0, dates.length - 1); poser(ep, cur); }
       });
+      // si tout a été vu N fois, on se place au passage N
+      const air = epsOf(cible).filter(diffuse);
+      if(air.length) cible.pass = Math.max(1, Math.min.apply(null, air.map(nbVues)));
       autoStatut(cible);
       coches += c; ok++;
-      dire("✓ " + cible.name + (c ? "  +" + c + " épisodes" : ""));
+      dire("✓ " + cible.name + (c ? "  +" + c + " épisodes" : "") + (rw ? "  (" + rw + " revisionnages)" : "") + (cible.pass > 1 ? "  passage " + cible.pass : ""));
       sauver();
     }catch(e){ rates.push(etiquette); dire("✗ " + etiquette + " (" + e.message + ")"); }
   }
@@ -1085,11 +1255,22 @@ document.addEventListener("change", ev => {
       try{
         const d = JSON.parse(rd.result);
         if(!d.shows) throw new Error("format inattendu");
+        if((d.schema || 1) > SCHEMA){
+          if(!confirm("Cette sauvegarde vient d'une version plus récente d'Antenne (schéma " + d.schema +
+            ", cette page gère le " + SCHEMA + "). Des données peuvent être ignorées. Continuer ?")) return;
+        }
         let ns = 0, ne = 0;
-        Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = v; ns++; } });
-        Object.entries(d.watched || {}).forEach(([k, v]) => { if(!DB.watched[k]){ DB.watched[k] = v; ne++; } });
+        Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = { pass:1, ...v }; ns++; } });
+        Object.entries(d.watched || {}).forEach(([k, v]) => {
+          const inc = Array.isArray(v) ? v : (v ? [v] : []);
+          const cur = Array.isArray(DB.watched[k]) ? DB.watched[k] : (DB.watched[k] ? [DB.watched[k]] : []);
+          const fus = [...new Set([...cur, ...inc])].sort();
+          if(fus.length > cur.length){ ne += fus.length - cur.length; DB.watched[k] = fus; }
+        });
+        Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
+        Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
         sauver(); render();
-        toast(ns + " séries et " + ne + " épisodes ajoutés");
+        toast(ns + " séries et " + ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
       }catch(e){ toast("Fichier illisible : " + e.message); }
     };
     rd.readAsText(f);
@@ -1114,6 +1295,14 @@ async function majAuto(){
 }
 
 /* ---------- démarrage ---------- */
+// Nouvelle installation : rien à signaler. Données existantes : on signale la mise à jour.
+if(DB.meta.vue !== VERSION){
+  if(!Object.keys(DB.shows).length && !DB.meta.vue){ DB.meta.vue = VERSION; sauver(); }
+  else{
+    state.neuf = true;
+    setTimeout(() => toast("Antenne est passée en v" + VERSION + " — voir les nouveautés"), 900);
+  }
+}
 render();
 setTimeout(majAuto, 2500);
 window.addEventListener("beforeunload", () => { try{ localStorage.setItem(LS, JSON.stringify(DB)); }catch(e){} });
