@@ -14,17 +14,30 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317131f'/%3E%3Cpath d='M16 20V11M16 11l-6-4M16 11l6-4' stroke='%23ff7a45' stroke-width='2.4' stroke-linecap='round'/%3E%3Crect x='10' y='20' width='12' height='4' rx='1.6' fill='%237ee0b8'/%3E%3C/svg%3E">
 <style>
 :root{
-  --encre:#17131f;      /* fond, encre violette */
-  --carte:#211b2c;
-  --carte2:#2b2338;
-  --trait:#3a3049;
-  --papier:#f0eae0;     /* texte, papier magazine */
-  --gris:#9b93a8;
-  --signal:#ff7a45;     /* orange antenne */
-  --vu:#7ee0b8;         /* mint, épisode vu */
-  --rouge:#ff5f6d;
+  /* Thème sombre — l'encre violette, référence de l'identité */
+  --encre:#17131f; --carte:#211b2c; --carte2:#2b2338; --trait:#3a3049;
+  --papier:#f0eae0; --gris:#9b93a8;
+  --signal:#ff7a45; --signalF:rgba(255,122,69,.14); --signalB:rgba(255,122,69,.42); --surSignal:#2a1206;
+  --vu:#7ee0b8;     --vuF:rgba(126,224,184,.12);    --vuB:rgba(126,224,184,.35);    --surVu:#12352a;
+  --rouge:#ff5f6d;  --rougeB:rgba(255,95,109,.35);
+  --voile:rgba(23,19,31,.92);
+  --grain:#fff; --grainO:.035;
+  --lisere:rgba(240,234,224,.08);
+  --bAir:#4a3f5e; --bFut:#2e2740; --bRev:#3f6b5c;
   --r:12px;
   --tab:calc(60px + env(safe-area-inset-bottom));
+}
+html[data-theme="clair"]{
+  /* Thème clair — la page de magazine, même encre, même orange d'antenne */
+  --encre:#f4f1f7; --carte:#ffffff; --carte2:#eee9f4; --trait:#dcd5e6;
+  --papier:#221b2e; --gris:#6b6379;
+  --signal:#c2410c; --signalF:rgba(194,65,12,.09); --signalB:rgba(194,65,12,.32); --surSignal:#fff;
+  --vu:#0f7a5a;     --vuF:rgba(15,122,90,.09);     --vuB:rgba(15,122,90,.32);     --surVu:#fff;
+  --rouge:#c92a4a;  --rougeB:rgba(201,42,74,.32);
+  --voile:rgba(244,241,247,.93);
+  --grain:#000; --grainO:.02;
+  --lisere:rgba(34,27,46,.1);
+  --bAir:#b7abcb; --bFut:#e5dfee; --bRev:#8fc9b4;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -36,8 +49,8 @@ body{
   overscroll-behavior-y:none;
 }
 body::before{ /* grain de diffusion très léger */
-  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.035;
-  background-image:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 3px);
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:var(--grainO);
+  background-image:repeating-linear-gradient(0deg,var(--grain) 0 1px,transparent 1px 3px);
 }
 button,input,select,textarea{font:inherit;color:inherit}
 button{background:none;border:0;cursor:pointer;padding:0}
@@ -48,7 +61,7 @@ h1,h2,h3{font-family:Archivo,system-ui,sans-serif;font-weight:700;margin:0;lette
 /* ------------ ossature ------------- */
 .wrap{max-width:680px;margin:0 auto;padding:0 14px calc(var(--tab) + 24px);position:relative;z-index:1}
 header.top{
-  position:sticky;top:0;z-index:30;background:rgba(23,19,31,.92);
+  position:sticky;top:0;z-index:30;background:var(--voile);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-bottom:1px solid var(--trait);
   padding-top:env(safe-area-inset-top);
@@ -60,7 +73,7 @@ header.top{
 .top-sp{flex:1}
 .ver{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.04em;color:var(--gris);
   border:1px solid var(--trait);background:var(--carte);border-radius:6px;padding:2px 6px;align-self:center}
-.ver.neuf{color:var(--signal);border-color:rgba(255,122,69,.45);background:rgba(255,122,69,.1)}
+.ver.neuf{color:var(--signal);border-color:var(--signalB);background:var(--signalF)}
 .cl{border-top:1px solid var(--trait);padding:11px 0}
 .cl:first-of-type{border-top:0;padding-top:2px}
 .cl-h{display:flex;align-items:baseline;gap:9px}
@@ -81,7 +94,7 @@ header.top{
 /* ------------ barre d'onglets ------------- */
 nav.tabs{
   position:fixed;left:0;right:0;bottom:0;z-index:40;
-  background:rgba(23,19,31,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  background:var(--voile);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   border-top:1px solid var(--trait);padding-bottom:env(safe-area-inset-bottom);
 }
 .tabs-in{max-width:680px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
@@ -90,7 +103,7 @@ nav.tabs{
   border-top:2px solid transparent;margin-top:-1px}
 .tab.on{color:var(--papier);border-top-color:var(--signal)}
 .tab.on svg{color:var(--signal)}
-.tab .badge{position:absolute;transform:translate(14px,-6px);background:var(--signal);color:#2a1206;
+.tab .badge{position:absolute;transform:translate(14px,-6px);background:var(--signal);color:var(--surSignal);
   border-radius:9px;padding:0 5px;font-size:9px;font-weight:600;line-height:14px}
 .tab-wrap{position:relative;display:flex}
 
@@ -100,7 +113,7 @@ nav.tabs{
 .poster{width:58px;height:84px;border-radius:7px;background:var(--carte2) center/cover no-repeat;
   flex:0 0 58px;position:relative;overflow:hidden}
 .poster.lg{width:104px;height:150px;flex:0 0 104px}
-.poster::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px rgba(240,234,224,.08);border-radius:7px}
+.poster::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px var(--lisere);border-radius:7px}
 .ph{display:grid;place-items:center;color:var(--trait);font-family:Archivo;font-size:22px;font-weight:700;height:100%}
 .info{min-width:0;flex:1}
 .title{font-family:Archivo;font-weight:600;font-size:15.5px;line-height:1.2;
@@ -110,38 +123,38 @@ nav.tabs{
 .code{font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:600;letter-spacing:.04em;
   background:var(--carte2);border:1px solid var(--trait);color:var(--papier);
   padding:1px 6px;border-radius:5px;display:inline-block}
-.code.next{background:rgba(255,122,69,.14);border-color:rgba(255,122,69,.42);color:var(--signal)}
-.code.vu{background:rgba(126,224,184,.12);border-color:rgba(126,224,184,.35);color:var(--vu)}
-.code.pass{background:rgba(255,122,69,.12);border-color:rgba(255,122,69,.38);color:var(--signal)}
+.code.next{background:var(--signalF);border-color:var(--signalB);color:var(--signal)}
+.code.vu{background:var(--vuF);border-color:var(--vuB);color:var(--vu)}
+.code.pass{background:var(--signalF);border-color:var(--signalB);color:var(--signal)}
 .xn{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--vu);
-  background:rgba(126,224,184,.12);border:1px solid rgba(126,224,184,.3);border-radius:5px;
+  background:var(--vuF);border:1px solid var(--vuB);border-radius:5px;
   padding:0 5px;flex:0 0 auto}
 .plus1{width:30px;height:30px;border-radius:8px;flex:0 0 30px;display:grid;place-items:center;
-  color:var(--vu);border:1px solid rgba(126,224,184,.3);font-family:"IBM Plex Mono",monospace;
+  color:var(--vu);border:1px solid var(--vuB);font-family:"IBM Plex Mono",monospace;
   font-size:11px;font-weight:600}
 
 /* ------------ SIGNATURE : la grille de diffusion ------------- */
 .strip{display:flex;gap:1.5px;height:7px;margin-top:9px;border-radius:2px;overflow:hidden}
 .strip i{flex:1 1 0;min-width:1.5px;background:var(--trait);border-radius:1px}
-.strip i.a{background:#4a3f5e}                 /* diffusé, pas vu */
+.strip i.a{background:var(--bAir)}             /* diffusé, pas vu */
 .strip i.w{background:var(--vu)}               /* vu */
-.strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,#4a3f5e 50% 100%)} /* partiel */
-.strip i.r{background:#3f6b5c}                 /* vu lors d'un passage précédent */
-.strip i.f{background:#2e2740}                 /* à venir */
+.strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,var(--bAir) 50% 100%)} /* partiel */
+.strip i.r{background:var(--bRev)}             /* vu lors d'un passage précédent */
+.strip i.f{background:var(--bFut)}             /* à venir */
 .stripmeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;
   font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);letter-spacing:.03em}
 
 /* ------------ boutons ------------- */
 .check{flex:0 0 auto;width:44px;height:44px;border-radius:50%;border:1.5px solid var(--trait);
   display:grid;place-items:center;color:var(--gris);align-self:center;background:var(--carte2)}
-.check.on{background:var(--vu);border-color:var(--vu);color:#12352a}
+.check.on{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
 .check:active{transform:scale(.92)}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 15px;
   border-radius:10px;background:var(--carte2);border:1px solid var(--trait);
   font-weight:600;font-size:14px}
 .btn:active{background:var(--trait)}
-.btn.pri{background:var(--signal);border-color:var(--signal);color:#2a1206}
-.btn.dgr{color:var(--rouge);border-color:rgba(255,95,109,.35)}
+.btn.pri{background:var(--signal);border-color:var(--signal);color:var(--surSignal)}
+.btn.dgr{color:var(--rouge);border-color:var(--rougeB)}
 .btn.full{width:100%}
 .btn.sm{padding:7px 11px;font-size:12.5px;border-radius:8px}
 .chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-ms-overflow-style:none}
@@ -150,6 +163,16 @@ nav.tabs{
   border:1px solid var(--trait);color:var(--gris);font-size:12.5px;font-weight:500}
 .chip.on{background:var(--papier);border-color:var(--papier);color:var(--encre);font-weight:600}
 .stack{display:flex;flex-direction:column;gap:9px}
+.serie{display:flex}
+.ops{display:flex;flex-direction:column;justify-content:center;gap:7px;padding:9px 9px 9px 0}
+.op{width:34px;height:34px;border-radius:9px;flex:0 0 34px;display:grid;place-items:center;
+  border:1px solid var(--trait);background:var(--carte2);color:var(--gris)}
+.op:active{transform:scale(.92)}
+.op.on{color:var(--signal);border-color:var(--signalB);background:var(--signalF)}
+.op.sup:active{color:var(--rouge);border-color:var(--rougeB)}
+.card.arch{opacity:.5}
+.card.arch .poster{filter:grayscale(1)}
+.card.arch .strip{filter:grayscale(.8)}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
 
 /* ------------ recherche ------------- */
@@ -168,7 +191,7 @@ nav.tabs{
   border-bottom:1px solid var(--trait)}
 .hero .row{padding:0}
 .sheetnav{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
-  padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;background:rgba(23,19,31,.92);
+  padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;background:var(--voile);
   backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--trait)}
 .seg{display:flex;background:var(--carte);border:1px solid var(--trait);border-radius:10px;padding:3px;gap:3px}
 .seg button{flex:1;padding:8px 4px;border-radius:7px;font-size:12px;font-weight:600;color:var(--gris)}
@@ -178,14 +201,14 @@ nav.tabs{
 .season>summary::-webkit-details-marker{display:none}
 .season[open]>summary{border-bottom:1px solid var(--trait)}
 .season h3{font-size:14px;flex:1}
-.ep{display:flex;align-items:center;gap:10px;padding:9px 11px;border-top:1px solid rgba(58,48,73,.5)}
+.ep{display:flex;align-items:center;gap:10px;padding:9px 11px;border-top:1px solid var(--trait)}
 .ep:first-child{border-top:0}
 .ep .info{font-size:13.5px}
 .ep .t{font-size:13.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ep.done .t{color:var(--gris)}
 .epchk{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--trait);flex:0 0 34px;
   display:grid;place-items:center;color:var(--gris);background:var(--carte2)}
-.epchk.on{background:var(--vu);border-color:var(--vu);color:#12352a}
+.epchk.on{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
 .upto{width:30px;height:30px;border-radius:8px;flex:0 0 30px;display:grid;place-items:center;
   color:var(--gris);border:1px solid var(--trait)}
 .summary{color:var(--gris);font-size:13.5px;line-height:1.6}
@@ -230,7 +253,7 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
   flex:0 0 46px;position:relative;transition:.16s}
 .tg::after{content:"";position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;
   background:var(--gris);transition:.16s}
-.tg.on{background:rgba(126,224,184,.24);border-color:var(--vu)}
+.tg.on{background:var(--vuF);border-color:var(--vu)}
 .tg.on::after{left:22px;background:var(--vu)}
 .hide{display:none!important}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
@@ -244,8 +267,8 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
   <div class="top-in">
     <div class="mark">
       <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
-        <path d="M16 21V12M16 12 9 7M16 12l7-5" stroke="#ff7a45" stroke-width="2.6" stroke-linecap="round"/>
-        <rect x="9" y="21" width="14" height="5" rx="2" fill="#7ee0b8"/>
+        <path d="M16 21V12M16 12 9 7M16 12l7-5" stroke="var(--signal)" stroke-width="2.6" stroke-linecap="round"/>
+        <rect x="9" y="21" width="14" height="5" rx="2" fill="var(--vu)"/>
       </svg>
       Antenne
     </div>
@@ -282,9 +305,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.3.1";
+const VERSION = "1.4.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.4.0", d:"2026-08-24", t:"Thème clair et archives", l:[
+    "Thème clair, thème sombre, ou suivi du réglage du système. Le choix est mémorisé et appliqué dès l'ouverture.",
+    "Deux boutons à droite de chaque série dans Ma liste : archiver et retirer.",
+    "Les séries archivées passent en grisé, descendent en bas de la liste et disparaissent de À suivre et de l'Agenda.",
+    "Filtre Archivées pour les retrouver, et bouton d'archivage aussi dans la fiche.",
+    "Le temps restant cumulé ne compte plus les séries archivées."
+  ]},
   { v:"1.3.1", d:"2026-08-24", t:"Position de lecture", l:[
     "Cocher un épisode ne renvoie plus en haut de la page : la position est conservée, dans la liste comme dans la fiche.",
     "Plusieurs saisons peuvent rester dépliées en même temps, et le restent après avoir coché.",
@@ -321,6 +351,26 @@ const JOURNAL = [
     "Tout est stocké dans le navigateur, rien n'est envoyé ailleurs."
   ]}
 ];
+
+/* ---------- thème ----------
+   Le choix est doublé dans localStorage pour être appliqué dès la première
+   ligne exécutée : la base IndexedDB s'ouvre en asynchrone, et sans ce doublon
+   la page clignoterait en sombre avant de passer en clair.               */
+const LSTHEME = "antenne.theme";
+const THEMES = [["sombre", "Sombre"], ["clair", "Clair"], ["auto", "Système"]];
+const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
+
+function appliquerTheme(t){
+  const clair = t === "auto" ? !!(media && media.matches) : t === "clair";
+  document.documentElement.setAttribute("data-theme", clair ? "clair" : "sombre");
+  const m = document.querySelector('meta[name="theme-color"]');
+  if(m) m.setAttribute("content", clair ? "#f4f1f7" : "#17131f");
+}
+function litTheme(){ try{ return localStorage.getItem(LSTHEME); }catch(e){ return null; } }
+function themeActuel(){ return litTheme() || "sombre"; }
+appliquerTheme(themeActuel());
+if(media && media.addEventListener)
+  media.addEventListener("change", () => { if(themeActuel() === "auto") appliquerTheme("auto"); });
 
 /* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
@@ -393,6 +443,7 @@ const net = (() => {
    ============================================================ */
 const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false },
                    meta:{ created:Date.now(), vue:null } };
+DEFAULTS.settings.theme = "sombre";
 let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
@@ -556,6 +607,7 @@ function ajouterShow(sh, statut){
     ...sh,
     userStatus: statut || old.userStatus || "watching",
     pass: old.pass || 1,
+    archive: old.archive || false,
     favorite: old.favorite || false,
     addedAt: old.addedAt || Date.now(),
     lastFetched: Date.now()
@@ -641,7 +693,9 @@ const ICO = {
   cog :'<circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   check:'<path d="m4 12.5 5.2 5.2L20 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
   back:'<path d="M15 19 8 12l7-7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
-  down:'<path d="M12 4v12m0 0 5-5m-5 5-5-5M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+  down:'<path d="M12 4v12m0 0 5-5m-5 5-5-5M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+  poubelle:'<path d="M4 7h16M9.5 7V5.2A1.2 1.2 0 0 1 10.7 4h2.6a1.2 1.2 0 0 1 1.2 1.2V7M6.5 7l.9 12.1A1.5 1.5 0 0 0 8.9 20.5h6.2a1.5 1.5 0 0 0 1.5-1.4L17.5 7" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+  archive:'<rect x="3.2" y="4" width="17.6" height="4.6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M5.2 8.6V18.5A1.5 1.5 0 0 0 6.7 20h10.6a1.5 1.5 0 0 0 1.5-1.5V8.6M10 12.4h4" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" fill="none"/>'
 };
 const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICO[k] + '</svg>';
 
@@ -754,20 +808,28 @@ function carteSerie(sh){
   else if(up) ligne = pp + 'À jour · retour ' + relDate(up.d);
   else if(a.total && a.watched === a.total) ligne = pp + 'Terminée';
   else ligne = pp + 'À jour';
-  return '<button class="card row" data-act="open" data-id="' + sh.id + '">' +
+  return '<div class="card serie' + (sh.archive ? " arch" : "") + '">' +
+    '<button class="row" style="flex:1;min-width:0" data-act="open" data-id="' + sh.id + '">' +
     affiche(sh) +
     '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
     '<div class="sub">' + ligne + '</div>' + bande(sh) +
     '<div class="stripmeta"><span>' + a.watched + '/' + a.aired + ' vus</span>' +
       '<span style="color:' + (reste ? "var(--signal)" : "var(--gris)") + '">' + resteTxt + '</span>' +
       '<span>' + a.pct + ' %</span></div>' +
-    '</div></button>';
+    '</div></button>' +
+    '<div class="ops">' +
+      '<button class="op' + (sh.archive ? " on" : "") + '" data-act="archiver" data-id="' + sh.id + '" ' +
+        'title="' + (sh.archive ? "Sortir des archives" : "Archiver") + '" aria-label="' + (sh.archive ? "Sortir des archives" : "Archiver") + '">' +
+        svg("archive", 17) + '</button>' +
+      '<button class="op sup" data-act="supprimer" data-id="' + sh.id + '" title="Retirer de ma liste" aria-label="Retirer de ma liste">' +
+        svg("poubelle", 17) + '</button>' +
+    '</div></div>';
 }
 
 /* ---------- vue : À suivre ---------- */
 function listeASuivre(){
   return Object.values(DB.shows)
-    .filter(sh => sh.userStatus === "watching" || sh.userStatus === "planned")
+    .filter(sh => !sh.archive && (sh.userStatus === "watching" || sh.userStatus === "planned"))
     .map(sh => ({ sh, ep: prochainAVoir(sh) }))
     .filter(x => x.ep)
     .sort((a, b) => String(b.ep.d).localeCompare(String(a.ep.d)));
@@ -807,7 +869,7 @@ function carteEpisode(sh, ep){
 const FILTRES = [
   { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
   { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
-  { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }
+  { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }, { id:"archived", l:"Archivées" }
 ];
 function vueListe(){
   const tout = Object.values(DB.shows);
@@ -818,6 +880,9 @@ function vueListe(){
   /* --- filtrage --- */
   let l = tout;
   const f = state.filtre;
+  // Les archives n'apparaissent que dans « Toutes », reléguées en bas, et dans leur propre filtre.
+  if(f === "archived")      l = l.filter(sh => sh.archive);
+  else if(f !== "all")      l = l.filter(sh => !sh.archive);
   if(f === "rewatch")       l = l.filter(sh => passe(sh) > 1);
   else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
   else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
@@ -840,6 +905,8 @@ function vueListe(){
     : t === "reste"    ? (tempsRestant(a) || 9e9) - (tempsRestant(b) || 9e9) || a.name.localeCompare(b.name)
     : t === "long"     ? tempsRestant(b) - tempsRestant(a) || a.name.localeCompare(b.name)
     : dNext(b).localeCompare(dNext(a)) || a.name.localeCompare(b.name));
+  // quel que soit le tri, les archives ferment la marche
+  l = l.filter(sh => !sh.archive).concat(l.filter(sh => sh.archive));
 
   /* --- facettes calculées sur la bibliothèque entière --- */
   const compte = (cle) => {
@@ -884,7 +951,7 @@ function vueListe(){
       .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
 
   /* --- corps --- */
-  const resteTotal = l.reduce((x, sh) => x + tempsRestant(sh), 0);
+  const resteTotal = l.filter(sh => !sh.archive).reduce((x, sh) => x + tempsRestant(sh), 0);
   const vus = l.slice(0, state.limite);
   const corps = l.length
     ? '<div class="stack">' + vus.map(carteSerie).join("") + '</div>' +
@@ -908,7 +975,7 @@ function vueListe(){
 function vueAgenda(){
   const out = [];
   Object.values(DB.shows).forEach(sh => {
-    if(sh.userStatus === "dropped") return;
+    if(sh.userStatus === "dropped" || sh.archive) return;
     epsOf(sh).forEach(e => { if(e.d && e.d >= todayISO()) out.push({ sh, e }); });
   });
   out.sort((a, b) => a.e.d.localeCompare(b.e.d) || a.sh.name.localeCompare(b.sh.name));
@@ -1093,9 +1160,12 @@ function vueFiche(sh){
       '<div class="stack">' + blocsSaisons + '</div>' +
       '<div class="eyebrow">Gestion</div>' +
       '<div class="grid2">' +
+        '<button class="btn' + (sh.archive ? " pri" : "") + '" data-act="archiver" data-id="' + sh.id + '">' +
+          svg("archive", 16) + (sh.archive ? " Sortir des archives" : " Archiver") + '</button>' +
         (sh.url ? '<a class="btn" href="' + esc(sh.url) + '" target="_blank" rel="noopener">Fiche TVmaze</a>' : '<span></span>') +
-        '<button class="btn dgr" data-act="remove" data-id="' + sh.id + '">Retirer la série</button>' +
       '</div>' +
+      '<button class="btn dgr full" style="margin-top:9px" data-act="remove" data-id="' + sh.id + '">' +
+        svg("poubelle", 16) + ' Retirer la série</button>' +
     '</div></div>';
 }
 
@@ -1130,7 +1200,10 @@ function vueReglages(){
 
   '<div class="eyebrow">Affichage</div>' +
   '<div class="box">' +
-    '<div class="sw"><div class="info"><div>Épisodes spéciaux</div><div class="note">Hors-séries, récaps et OAV comptés dans l\'avancement.</div></div>' +
+    '<div style="font-size:13.5px;margin-bottom:8px">Thème</div>' +
+    '<div class="seg">' + THEMES.map(([id, l]) =>
+      '<button class="' + (themeActuel() === id ? "on" : "") + '" data-act="theme" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
+    '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px"><div class="info"><div>Épisodes spéciaux</div><div class="note">Hors-séries, récaps et OAV comptés dans l\'avancement.</div></div>' +
       '<button class="tg ' + (DB.settings.specials ? "on" : "") + '" data-act="tg" data-k="specials" role="switch" aria-checked="' + !!DB.settings.specials + '"></button></div>' +
   '</div>' +
 
@@ -1204,6 +1277,18 @@ document.addEventListener("click", async ev => {
   if(act === "plus"){ state.limite += PAGE; render(); return; }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
+  if(act === "archiver"){
+    const sh = DB.shows[+id]; if(!sh) return;
+    sh.archive = !sh.archive; sauverShow(sh); render();
+    toast(sh.archive ? "« " + sh.name + " » archivée" : "« " + sh.name + " » sortie des archives");
+    return;
+  }
+  if(act === "supprimer"){
+    const sh = DB.shows[+id]; if(!sh) return;
+    if(!confirm("Retirer « " + sh.name + " » de ta liste ?\n\nSes épisodes cochés seront effacés. Pour la garder sans la suivre, archive-la plutôt.")) return;
+    retirerShow(+id); render(); toast("Série retirée");
+    return;
+  }
   if(act === "close-sheet"){ history.back(); return; }
 
   if(act === "tick" || act === "upto" || act === "again"){
@@ -1271,6 +1356,12 @@ document.addEventListener("click", async ev => {
     if(sh){ ajouterShow(sh, "planned"); render(); ouvrirFiche(+id); }
     return;
   }
+  if(act === "theme"){
+    DB.settings.theme = id;
+    try{ localStorage.setItem(LSTHEME, id); }catch(e){}
+    appliquerTheme(id); sauver(); render();
+    return;
+  }
   if(act === "tg"){
     DB.settings[el.dataset.k] = !DB.settings[el.dataset.k]; sauver(); render(); return;
   }
@@ -1292,7 +1383,7 @@ document.addEventListener("click", async ev => {
     if(!confirm("Dernière confirmation : as-tu exporté une sauvegarde ?")) return;
     try{ await IDB.vider(); }catch(e){}
     localStorage.removeItem(LS);
-    DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION;
+    DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION; DB.settings.theme = themeActuel();
     sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
     render(); majQuota(); toast("Données effacées"); return;
   }
@@ -1620,6 +1711,7 @@ async function demarrer(){
     }
     DB = assembler(k);
     pret = true;
+    if(DB.settings.theme){ localStorage.setItem(LSTHEME, DB.settings.theme); appliquerTheme(DB.settings.theme); }
     if(repris) setTimeout(() => toast(repris + " séries reprises depuis l'ancien stockage"), 800);
   }catch(e){
     echec("Lecture impossible", String(e && e.message || e));
