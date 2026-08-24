@@ -281,9 +281,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.2.0";
+const VERSION = "1.3.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.3.0", d:"2026-08-24", t:"Stockage IndexedDB", l:[
+    "Passage de localStorage à IndexedDB : le plafond de 5 Mo disparaît, la place disponible se compte en centaines de Mo.",
+    "Écriture granulaire : cocher un épisode enregistre un seul élément au lieu de resérialiser toute la bibliothèque.",
+    "Reprise automatique des données de l'ancien stockage à la première ouverture, sans rien effacer.",
+    "Espace réellement utilisé affiché dans les Réglages, et bouton de stockage durable contre l'effacement automatique.",
+    "Le format des sauvegardes ne change pas : un export v1.2 se réimporte tel quel."
+  ]},
   { v:"1.2.0", d:"2026-08-24", t:"Grande bibliothèque", l:[
     "Temps restant affiché sur chaque série, et cumulé en tête de liste.",
     "Filtrage par titre, insensible aux accents et à la casse.",
@@ -370,36 +377,144 @@ const net = (() => {
   return { get: url => new Promise((res, rej) => { q.push({ url, res, rej }); pump(); }) };
 })();
 
-/* ---------- stockage ---------- */
+/* ============================================================
+   STOCKAGE — IndexedDB
+   L'objet DB reste la source de vérité en mémoire : tout le rendu
+   travaille dessus de façon synchrone, comme avant. Seules la lecture
+   initiale et les écritures passent par la base, en asynchrone.
+   Les écritures sont granulaires : cocher un épisode écrit un seul
+   enregistrement, pas la bibliothèque entière.
+   ============================================================ */
 const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false },
                    meta:{ created:Date.now(), vue:null } };
-let DB = charger();
+let DB = JSON.parse(JSON.stringify(DEFAULTS));
+let pret = false;
 
-function charger(){
-  try{
-    const raw = localStorage.getItem(LS);
-    if(raw){
-      const d = JSON.parse(raw);
-      const w = d.watched || {};
-      // v1 : une date par épisode  →  v2 : liste de visionnages
-      Object.keys(w).forEach(k => { if(!Array.isArray(w[k])) w[k] = w[k] ? [w[k]] : []; if(!w[k].length) delete w[k]; });
-      Object.values(d.shows || {}).forEach(sh => { if(!sh.pass) sh.pass = 1; });
-      d.version = SCHEMA;
-      return { ...DEFAULTS, ...d, settings:{ ...DEFAULTS.settings, ...(d.settings||{}) },
-               meta:{ ...DEFAULTS.meta, ...(d.meta||{}) }, shows:d.shows||{}, watched:w };
+const IDB = (() => {
+  const NOM = "antenne", V = 1;
+  let db = null;
+  const prom = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
+  const stores = ["shows", "watched", "kv"];
+  return {
+    ouvrir(){
+      return new Promise((res, rej) => {
+        if(!window.indexedDB) return rej(new Error("IndexedDB indisponible"));
+        const r = indexedDB.open(NOM, V);
+        r.onupgradeneeded = () => {
+          const d = r.result;
+          if(!d.objectStoreNames.contains("shows"))   d.createObjectStore("shows", { keyPath:"id" });
+          if(!d.objectStoreNames.contains("watched")) d.createObjectStore("watched");
+          if(!d.objectStoreNames.contains("kv"))      d.createObjectStore("kv");
+        };
+        r.onsuccess = () => { db = r.result; res(db); };
+        r.onerror = () => rej(r.error || new Error("ouverture refusée"));
+        r.onblocked = () => rej(new Error("base verrouillée par un autre onglet"));
+      });
+    },
+    async tout(){
+      const t = db.transaction(stores, "readonly");
+      const [shows, wk, wv, kk, kvv] = await Promise.all([
+        prom(t.objectStore("shows").getAll()),
+        prom(t.objectStore("watched").getAllKeys()),
+        prom(t.objectStore("watched").getAll()),
+        prom(t.objectStore("kv").getAllKeys()),
+        prom(t.objectStore("kv").getAll())
+      ]);
+      const watched = {}; wk.forEach((k, i) => { watched[k] = wv[i]; });
+      const kv = {};      kk.forEach((k, i) => { kv[k] = kvv[i]; });
+      return { shows, watched, kv };
+    },
+    ecrire(lots){
+      return new Promise((res, rej) => {
+        const t = db.transaction(stores, "readwrite");
+        t.oncomplete = () => res();
+        t.onerror = () => rej(t.error);
+        t.onabort  = () => rej(t.error || new Error("écriture annulée"));
+        const S = t.objectStore("shows"), W = t.objectStore("watched"), K = t.objectStore("kv");
+        (lots.shows || []).forEach(sh => S.put(sh));
+        (lots.suppr || []).forEach(id => S.delete(Number(id)));
+        Object.keys(lots.vues || {}).forEach(k => { const v = lots.vues[k]; if(v && v.length) W.put(v, k); else W.delete(k); });
+        Object.keys(lots.kv || {}).forEach(k => K.put(lots.kv[k], k));
+      });
+    },
+    vider(){
+      return new Promise((res, rej) => {
+        const t = db.transaction(stores, "readwrite");
+        t.oncomplete = () => res(); t.onerror = () => rej(t.error);
+        stores.forEach(x => t.objectStore(x).clear());
+      });
     }
-  }catch(e){ console.warn("lecture localStorage", e); }
-  return JSON.parse(JSON.stringify(DEFAULTS));
+  };
+})();
+
+/* ---------- file d'écriture ---------- */
+const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), kv:false };
+let _fl;
+function planifier(){ clearTimeout(_fl); _fl = setTimeout(ecouler, 150); }
+async function ecouler(){
+  if(!pret) return;
+  if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.kv) return;
+  const lots = { shows:[], suppr:[...sale.suppr], vues:{}, kv:{} };
+  sale.shows.forEach(id => { const sh = DB.shows[id]; if(sh) lots.shows.push(sh); });
+  sale.vues.forEach(k => { lots.vues[k] = DB.watched[k] || null; });
+  if(sale.kv) lots.kv = { settings:DB.settings, meta:DB.meta, version:SCHEMA };
+  sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sale.kv = false;
+  try{ await IDB.ecrire(lots); }
+  catch(e){ toast("Enregistrement impossible : " + (e && e.message || e)); }
 }
-let _sv;
-function sauver(){
-  clearTimeout(_sv);
-  _sv = setTimeout(() => {
-    try{ localStorage.setItem(LS, JSON.stringify(DB)); }
-    catch(e){ toast("Stockage plein — exporte puis allège ta liste"); }
-  }, 120);
+function sauver(){ sale.kv = true; planifier(); }
+function sauverShow(sh){ if(sh) sale.shows.add(String(sh.id)); sale.kv = true; planifier(); }
+function salirVues(k){ sale.vues.add(String(k)); planifier(); }
+function toutSalir(){
+  Object.keys(DB.shows).forEach(id => sale.shows.add(id));
+  Object.keys(DB.watched).forEach(k => sale.vues.add(k));
+  sale.kv = true; planifier();
 }
-function poids(){ try{ return new Blob([JSON.stringify(DB)]).size; }catch(e){ return 0; } }
+
+/* ---------- lecture et reprise de l'ancien stockage ---------- */
+function assembler(k){
+  const d = JSON.parse(JSON.stringify(DEFAULTS));
+  (k.shows || []).forEach(sh => { if(!sh.pass) sh.pass = 1; d.shows[sh.id] = sh; });
+  Object.keys(k.watched || {}).forEach(key => {
+    const v = k.watched[key];
+    const a = Array.isArray(v) ? v : (v ? [v] : []);
+    if(a.length) d.watched[key] = a;
+  });
+  d.settings = { ...DEFAULTS.settings, ...(k.kv.settings || {}) };
+  d.meta     = { ...DEFAULTS.meta,     ...(k.kv.meta     || {}) };
+  return d;
+}
+async function reprendreLocalStorage(){
+  const raw = localStorage.getItem(LS);
+  if(!raw) return 0;
+  const d = JSON.parse(raw);
+  const shows = Object.values(d.shows || {}).map(sh => ({ ...sh, pass:sh.pass || 1 }));
+  const vues = {};
+  Object.keys(d.watched || {}).forEach(k => {
+    const v = d.watched[k], a = Array.isArray(v) ? v : (v ? [v] : []);
+    if(a.length) vues[k] = a;
+  });
+  await IDB.ecrire({ shows, vues, kv:{
+    settings:d.settings || {}, version:SCHEMA,
+    meta:{ ...(d.meta || {}), repris:new Date().toISOString() } } });
+  return shows.length;
+}
+
+/* ---------- espace disque ---------- */
+async function majQuota(){
+  if(!navigator.storage || !navigator.storage.estimate) return;
+  try{
+    state.quota = await navigator.storage.estimate();
+    state.durable = navigator.storage.persisted ? await navigator.storage.persisted() : false;
+    if(pret && state.tab === "reglages" && !state.detail && !state.cherche) render();
+  }catch(e){}
+}
+function ko(o){
+  if(o == null) return "?";
+  if(o > 1048576) return (o / 1048576).toFixed(1) + " Mo";
+  if(o > 1024) return Math.round(o / 1024) + " Ko";
+  return o + " o";
+}
 
 /* ---------- modèle ---------- */
 function normShow(s){
@@ -439,13 +554,13 @@ function ajouterShow(sh, statut){
     addedAt: old.addedAt || Date.now(),
     lastFetched: Date.now()
   };
-  sauver();
+  sauverShow(DB.shows[sh.id]);
 }
 function retirerShow(id){
   const sh = DB.shows[id];
-  if(sh) (sh.eps || []).forEach(e => { delete DB.watched[e.i]; });
+  if(sh) (sh.eps || []).forEach(e => { delete DB.watched[e.i]; salirVues(e.i); });
   delete DB.shows[id];
-  sauver();
+  sale.suppr.add(String(id)); sale.shows.delete(String(id)); sauver();
 }
 const epsOf = sh => (sh.eps || []).filter(e => DB.settings.specials || !e.sp);
 const diffuse = e => !!e.d && e.d <= todayISO();
@@ -462,6 +577,7 @@ const dejaVu = e => nbVues(e) > 0;
 function poser(ep, liste){
   if(liste && liste.length) DB.watched[ep.i] = liste;
   else delete DB.watched[ep.i];
+  salirVues(ep.i);
 }
 function avancement(sh){
   const eps = epsOf(sh);
@@ -498,11 +614,11 @@ function marquerJusqua(sh, ep){
   eps.slice(0, idx + 1).filter(diffuse).forEach(e => marquer(e, sh, true));
   sauver();
 }
-function nouveauPassage(sh){ sh.pass = passe(sh) + 1; sauver(); }
+function nouveauPassage(sh){ sh.pass = passe(sh) + 1; sauverShow(sh); }
 function annulerPassage(sh){
   if(passe(sh) <= 1) return;
   epsOf(sh).forEach(e => { const v = vues(e).slice(); if(v.length >= passe(sh)) v.pop(); poser(e, v); });
-  sh.pass = passe(sh) - 1; sauver();
+  sh.pass = passe(sh) - 1; sauverShow(sh);
 }
 function autoStatut(sh){
   const a = avancement(sh);
@@ -526,7 +642,8 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 saison:null, journal:false, neuf:false,
-                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60 };
+                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
+                quota:null, durable:false };
 const PAGE = 60;
 
 const TABS = [
@@ -991,7 +1108,17 @@ function vueReglages(){
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + '</div><div class="l">séries</div></div>' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">visionnages</div></div>' +
     '</div>' +
-    '<p class="note" style="margin-top:11px">Stockage occupé : ' + (poids() / 1024).toFixed(0) + ' Ko sur ~5 Mo disponibles. Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
+    '<p class="note" style="margin-top:11px">' +
+      (state.quota
+        ? 'Espace utilisé : <b class="mono">' + ko(state.quota.usage) + '</b> sur <b class="mono">' + ko(state.quota.quota) + '</b> alloués par le navigateur.'
+        : 'Espace utilisé : mesure en cours…') +
+      ' Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
+    '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
+      '<div class="info"><div>Stockage durable ' +
+        (state.durable ? '<span class="code vu">actif</span>' : '<span class="code">inactif</span>') + '</div>' +
+        '<div class="note">Sans lui, un navigateur peut effacer les données d\'un site resté longtemps sans visite. ' +
+        'Le mettre en place ne coûte rien et ne change rien d\'autre.</div></div>' +
+      (state.durable ? '' : '<button class="btn sm" data-act="durable">Activer</button>') + '</div>' +
     '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button>' +
     '<button class="btn full dgr" style="margin-top:9px" data-act="wipe">Effacer toutes les données</button></div>' +
 
@@ -1059,7 +1186,7 @@ document.addEventListener("click", async ev => {
     else if(act === "again"){ revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté"); }
     else marquer(ep, sh, !vu(ep, sh));
     if(state.detail) state.saison = ep.s;
-    autoStatut(sh); sauver();
+    autoStatut(sh); sauverShow(sh);
     const y = window.scrollY; render(); window.scrollTo(0, y);
     return;
   }
@@ -1067,11 +1194,11 @@ document.addEventListener("click", async ev => {
     ev.preventDefault();
     const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
     epsOf(sh).filter(e => e.s === s).forEach(e => marquer(e, sh, on));
-    autoStatut(sh); sauver(); state.saison = s; render();
+    autoStatut(sh); sauverShow(sh); state.saison = s; render();
     return;
   }
   if(act === "statut"){
-    const sh = DB.shows[+id]; sh.userStatus = el.dataset.v; sauver(); render();
+    const sh = DB.shows[+id]; sh.userStatus = el.dataset.v; sauverShow(sh); render();
     toast("Statut : " + (STATUTS.find(x => x[0] === el.dataset.v) || [])[1]);
     return;
   }
@@ -1121,10 +1248,23 @@ document.addEventListener("click", async ev => {
   if(act === "export-csv")  return exportCSV();
   if(act === "import-list") return importerListe();
   if(act === "refresh-all") return actualiserTout();
+  if(act === "durable"){
+    if(!navigator.storage || !navigator.storage.persist) return toast("Non géré par ce navigateur");
+    try{
+      const ok = await navigator.storage.persist();
+      toast(ok ? "Données protégées de l'effacement automatique"
+               : "Refusé pour l'instant — réessaie après quelques jours d'usage");
+    }catch(e){ toast("Refusé par le navigateur"); }
+    majQuota(); return;
+  }
   if(act === "wipe"){
     if(!confirm("Effacer définitivement toutes tes séries et tes épisodes vus ?")) return;
     if(!confirm("Dernière confirmation : as-tu exporté une sauvegarde ?")) return;
-    localStorage.removeItem(LS); DB = charger(); render(); toast("Données effacées"); return;
+    try{ await IDB.vider(); }catch(e){}
+    localStorage.removeItem(LS);
+    DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION;
+    sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
+    render(); majQuota(); toast("Données effacées"); return;
   }
 });
 
@@ -1310,7 +1450,7 @@ async function importerCSV(txt){
       // si tout a été vu N fois, on se place au passage N
       const air = epsOf(cible).filter(diffuse);
       if(air.length) cible.pass = Math.max(1, Math.min.apply(null, air.map(nbVues)));
-      autoStatut(cible);
+      autoStatut(cible); sauverShow(cible);
       coches += c; ok++;
       dire("✓ " + cible.name + (c ? "  +" + c + " épisodes" : "") + (rw ? "  (" + rw + " revisionnages)" : "") + (cible.pass > 1 ? "  passage " + cible.pass : ""));
       sauver();
@@ -1383,7 +1523,7 @@ document.addEventListener("change", ev => {
         });
         Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
         Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
-        sauver(); render();
+        toutSalir(); render();
         toast(ns + " séries et " + ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
       }catch(e){ toast("Fichier illisible : " + e.message); }
     };
@@ -1409,17 +1549,55 @@ async function majAuto(){
 }
 
 /* ---------- démarrage ---------- */
-// Nouvelle installation : rien à signaler. Données existantes : on signale la mise à jour.
-if(DB.meta.vue !== VERSION){
-  if(!Object.keys(DB.shows).length && !DB.meta.vue){ DB.meta.vue = VERSION; sauver(); }
-  else{
-    state.neuf = true;
-    setTimeout(() => toast("Antenne est passée en v" + VERSION + " — voir les nouveautés"), 900);
-  }
+function echec(msg, detail){
+  $("#view").innerHTML = '<div class="empty" style="padding-top:60px"><h3>' + esc(msg) + '</h3>' +
+    '<p>' + esc(detail || "") + '</p>' +
+    '<button class="btn" onclick="location.reload()">Recharger la page</button></div>';
 }
-render();
-setTimeout(majAuto, 2500);
-window.addEventListener("beforeunload", () => { try{ localStorage.setItem(LS, JSON.stringify(DB)); }catch(e){} });
+
+async function demarrer(){
+  $("#view").innerHTML = '<div class="empty" style="padding-top:70px"><p>Ouverture de la bibliothèque…</p></div>';
+  try{ await IDB.ouvrir(); }
+  catch(e){
+    echec("Stockage inaccessible",
+      "Ce navigateur refuse d'ouvrir la base locale. C'est le cas en navigation privée sur certains navigateurs, ou si un autre onglet d'Antenne est en cours de mise à jour.");
+    return;
+  }
+  try{
+    let k = await IDB.tout();
+    let repris = 0;
+    // Reprise unique de l'ancien stockage localStorage, qui n'est pas effacé.
+    if(!(k.kv.meta && k.kv.meta.repris) && !k.shows.length && localStorage.getItem(LS)){
+      repris = await reprendreLocalStorage();
+      k = await IDB.tout();
+    }
+    DB = assembler(k);
+    pret = true;
+    if(repris) setTimeout(() => toast(repris + " séries reprises depuis l'ancien stockage"), 800);
+  }catch(e){
+    echec("Lecture impossible", String(e && e.message || e));
+    return;
+  }
+
+  // Nouvelle installation : rien à signaler. Données existantes : on signale la mise à jour.
+  if(DB.meta.vue !== VERSION){
+    if(!Object.keys(DB.shows).length && !DB.meta.vue){ DB.meta.vue = VERSION; sauver(); }
+    else{
+      state.neuf = true;
+      setTimeout(() => toast("Antenne est passée en v" + VERSION + " — voir les nouveautés"), 1500);
+    }
+  }
+
+  render();
+  majQuota();
+  setTimeout(majAuto, 2500);
+}
+
+// Écriture immédiate quand l'onglet passe en arrière-plan ou se ferme.
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") ecouler(); });
+window.addEventListener("pagehide", ecouler);
+
+demarrer();
 </script>
 </body>
 </html>
