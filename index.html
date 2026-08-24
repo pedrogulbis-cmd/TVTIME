@@ -141,7 +141,7 @@ nav.tabs{
 .strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,var(--bAir) 50% 100%)} /* partiel */
 .strip i.r{background:var(--bRev)}             /* vu lors d'un passage précédent */
 .strip i.f{background:var(--bFut)}             /* à venir */
-.stripmeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;
+.stripmeta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 9px;margin-top:6px;
   font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);letter-spacing:.03em}
 
 /* ------------ boutons ------------- */
@@ -305,9 +305,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.5.0";
+const VERSION = "1.6.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.6.0", d:"2026-08-24", t:"Compteur de revisionnage", l:[
+    "Ma liste indique combien de fois une série a été vue en entier, à côté du temps restant et du pourcentage.",
+    "Quand la série n'a pas été refaite en entier, le compteur indique le nombre d'épisodes revus.",
+    "La fiche détaille la mesure en toutes lettres.",
+    "À suivre s'affiche aussi par paquets de 60, comme Ma liste, pour rester fluide avec une grosse bibliothèque."
+  ]},
   { v:"1.5.0", d:"2026-08-24", t:"Import TV Time complet", l:[
     "L'archive .zip de TV Time se dépose telle quelle : elle est lue et décompressée dans le navigateur.",
     "Le format tracking-prod-records-v2 est reconnu nativement : correspondance par identifiant TVDB, sans ambiguïté de titre.",
@@ -664,6 +670,22 @@ function tempsRestant(sh){
                   .reduce((t, e) => t + (e.r || sh.runtime || 42), 0);
 }
 function aVenir(sh){ return epsOf(sh).filter(e => e.d && e.d > todayISO()).length; }
+/* Nombre de fois où la série a été vue en entier : le plus petit nombre de
+   visionnages parmi les épisodes déjà diffusés. 0 tant qu'il en reste un seul
+   à voir. */
+function tours(sh){
+  const air = epsOf(sh).filter(diffuse);
+  if(!air.length) return 0;
+  return Math.min.apply(null, air.map(nbVues));
+}
+function episodesRevus(sh){ return epsOf(sh).filter(e => nbVues(e) > 1).length; }
+function revuTexte(sh){
+  const t = tours(sh), r = episodesRevus(sh);
+  if(t >= 2) return { court:"↺" + t, long:"Vue " + t + " fois en entier" +
+    (r ? ", dont " + r + " épisode" + (r > 1 ? "s" : "") + " revus" : "") };
+  if(r) return { court:"↺" + r, long:r + " épisode" + (r > 1 ? "s" : "") + " revu" + (r > 1 ? "s" : "") };
+  return null;
+}
 const norm = x => String(x == null ? "" : x).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function marquer(ep, sh, on){
   const v = vues(ep).slice();
@@ -710,7 +732,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 saisons:null, animer:false, retour:0, journal:false, neuf:false, annuler:false,
-                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
+                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60, limiteS:60,
                 quota:null, durable:false };
 const PAGE = 60;
 
@@ -806,7 +828,7 @@ function affiche(sh, cls){
 function carteSerie(sh){
   const a = avancement(sh);
   const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
-  const reste = tempsRestant(sh), futurs = aVenir(sh);
+  const reste = tempsRestant(sh), futurs = aVenir(sh), rev = revuTexte(sh);
   const resteTxt = reste ? "reste " + dureeLongue(reste)
     : futurs ? futurs + " à venir"
     : a.total && a.watched === a.total ? "complète" : "à jour";
@@ -823,6 +845,7 @@ function carteSerie(sh){
     '<div class="sub">' + ligne + '</div>' + bande(sh) +
     '<div class="stripmeta"><span>' + a.watched + '/' + a.aired + ' vus</span>' +
       '<span style="color:' + (reste ? "var(--signal)" : "var(--gris)") + '">' + resteTxt + '</span>' +
+      (rev ? '<span style="color:var(--vu)" title="' + esc(rev.long) + '">' + rev.court + '</span>' : "") +
       '<span>' + a.pct + ' %</span></div>' +
     '</div></button>' +
     '<div class="ops">' +
@@ -851,13 +874,26 @@ function vueASuivre(){
   if(!l.length) return '<div class="empty"><h3>Tu es à jour</h3><p>Aucun épisode diffusé en attente.</p>' +
     '<button class="btn" data-act="tab" data-id="agenda">Voir ce qui arrive</button></div>';
 
-  const enRetard = l.filter(x => { const d = new Date(x.ep.d + "T12:00:00"); return (Date.now() - d) > 21 * 86400000; });
-  const frais = l.filter(x => !enRetard.includes(x));
+  const seuil = Date.now() - 21 * 86400000;
+  const frais = [], enRetard = [];
+  l.forEach(x => (new Date(x.ep.d + "T12:00:00") < seuil ? enRetard : frais).push(x));
+
+  // On ne dessine qu'un paquet à la fois : au-delà de quelques dizaines de
+  // cartes, chacune recalculant sa grille de diffusion, le rendu devient lourd.
+  const lim = state.limiteS;
+  const fraisV = frais.slice(0, lim);
+  const retardV = enRetard.slice(0, Math.max(0, lim - fraisV.length));
+  const affichees = fraisV.length + retardV.length;
 
   const bloc = (arr, titre, n) => arr.length ? '<div class="eyebrow">' + titre + ' <b>' + n + '</b></div><div class="stack">' +
     arr.map(x => carteEpisode(x.sh, x.ep)).join("") + '</div>' : "";
 
-  return bloc(frais, "À regarder", frais.length) + bloc(enRetard, "En retard", enRetard.length);
+  const suite = l.length > affichees
+    ? '<button class="btn full" style="margin-top:12px" data-act="plus-suivre">Afficher ' +
+      Math.min(PAGE, l.length - affichees) + ' épisodes de plus <span class="mono" style="color:var(--gris)">(' +
+      affichees + '/' + l.length + ')</span></button>' : "";
+
+  return bloc(fraisV, "À regarder", frais.length) + bloc(retardV, "En retard", enRetard.length) + suite;
 }
 function carteEpisode(sh, ep){
   return '<div class="card" style="display:flex">' +
@@ -1145,6 +1181,7 @@ function vueFiche(sh){
       '<span>' + a.pct + ' % vus</span></div>' +
       '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage' +
       (P > 1 ? ' · <span style="color:var(--signal)">passage ' + P + '</span>' : "") + '</div>' +
+      (revuTexte(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(revuTexte(sh).long) + '</div>' : "") +
       '</div></div>' +
       (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
         svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>'
@@ -1276,7 +1313,11 @@ document.addEventListener("click", async ev => {
   if(!el) return;
   const act = el.dataset.act, id = el.dataset.id;
 
-  if(act === "tab"){ state.cherche = false; state.tab = id; render(); window.scrollTo(0, 0); return; }
+  if(act === "tab"){
+    state.cherche = false;
+    if(state.tab !== id){ state.limiteS = PAGE; state.limite = PAGE; }
+    state.tab = id; render(); window.scrollTo(0, 0); return;
+  }
   if(act === "changelog"){
     state.cherche = false; state.tab = "reglages"; state.journal = true; state.neuf = false;
     DB.meta.vue = VERSION; sauver(); render();
@@ -1297,6 +1338,7 @@ document.addEventListener("click", async ev => {
   }
   if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
   if(act === "plus"){ state.limite += PAGE; render(); return; }
+  if(act === "plus-suivre"){ state.limiteS += PAGE; render(); return; }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "archiver"){
