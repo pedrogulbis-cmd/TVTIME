@@ -281,9 +281,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.1.0";
+const VERSION = "1.2.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.2.0", d:"2026-08-24", t:"Grande bibliothèque", l:[
+    "Temps restant affiché sur chaque série, et cumulé en tête de liste.",
+    "Filtrage par titre, insensible aux accents et à la casse.",
+    "Panneau de filtres : genre, chaîne ou plateforme, série en production ou terminée.",
+    "Deux tris de plus : « Plus vite finie » et « Plus longue ».",
+    "Affichage par paquets de 60 séries pour rester fluide sur une grosse bibliothèque."
+  ]},
   { v:"1.1.0", d:"2026-08-24", t:"Revisionnage", l:[
     "Un épisode garde la liste datée de tous ses visionnages, plus un simple vu / pas vu.",
     "Bouton « Revoir depuis le début » : la série repart à S01E01 sans effacer l'historique.",
@@ -332,8 +339,8 @@ function relDate(iso){
 function dureeLongue(min){
   if(!min) return "0 h";
   const j = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
-  if(j) return j + " j " + h + " h";
-  if(h) return h + " h " + p2(m);
+  if(j) return h ? j + " j " + h + " h" : j + " j";
+  if(h) return m ? h + " h " + p2(m) : h + " h";
   return m + " min";
 }
 function toast(msg){
@@ -468,6 +475,14 @@ function prochaineDiffusion(sh){ return epsOf(sh).find(e => e.d && e.d > todayIS
 function tempsVu(sh){
   return epsOf(sh).reduce((t, e) => t + nbVues(e) * (e.r || sh.runtime || 42), 0);
 }
+/* Temps qu'il reste à regarder pour boucler le passage en cours,
+   sur les seuls épisodes déjà diffusés. */
+function tempsRestant(sh){
+  return epsOf(sh).filter(e => diffuse(e) && !vu(e, sh))
+                  .reduce((t, e) => t + (e.r || sh.runtime || 42), 0);
+}
+function aVenir(sh){ return epsOf(sh).filter(e => e.d && e.d > todayISO()).length; }
+const norm = x => String(x == null ? "" : x).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function marquer(ep, sh, on){
   const v = vues(ep).slice();
   if(on){ if(v.length < passe(sh)) v.push(new Date().toISOString()); }
@@ -510,7 +525,9 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                saison:null, journal:false, neuf:false };
+                saison:null, journal:false, neuf:false,
+                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60 };
+const PAGE = 60;
 
 const TABS = [
   { id:"upnext",  l:"À suivre", i:"play" },
@@ -579,6 +596,10 @@ function affiche(sh, cls){
 function carteSerie(sh){
   const a = avancement(sh);
   const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
+  const reste = tempsRestant(sh), futurs = aVenir(sh);
+  const resteTxt = reste ? "reste " + dureeLongue(reste)
+    : futurs ? futurs + " à venir"
+    : a.total && a.watched === a.total ? "complète" : "à jour";
   const pp = passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "";
   let ligne;
   if(nx) ligne = pp + '<span class="code next">S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span> ' + esc(nx.t || "");
@@ -589,7 +610,9 @@ function carteSerie(sh){
     affiche(sh) +
     '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
     '<div class="sub">' + ligne + '</div>' + bande(sh) +
-    '<div class="stripmeta"><span>' + a.watched + '/' + a.aired + ' vus</span><span>' + a.pct + ' %</span></div>' +
+    '<div class="stripmeta"><span>' + a.watched + '/' + a.aired + ' vus</span>' +
+      '<span style="color:' + (reste ? "var(--signal)" : "var(--gris)") + '">' + resteTxt + '</span>' +
+      '<span>' + a.pct + ' %</span></div>' +
     '</div></button>';
 }
 
@@ -639,35 +662,98 @@ const FILTRES = [
   { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }
 ];
 function vueListe(){
-  let l = Object.values(DB.shows);
+  const tout = Object.values(DB.shows);
+  if(!tout.length)
+    return '<div class="empty" style="padding-top:64px"><h3>Liste vide</h3><p>Ajoute une première série pour démarrer.</p>' +
+      '<button class="btn pri" data-act="go-search">Chercher une série</button></div>';
+
+  /* --- filtrage --- */
+  let l = tout;
   const f = state.filtre;
-  if(f === "rewatch")   l = l.filter(sh => passe(sh) > 1);
-  else if(f === "late") l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
+  if(f === "rewatch")       l = l.filter(sh => passe(sh) > 1);
+  else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
   else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
-  else if(f !== "all")  l = l.filter(sh => sh.userStatus === f);
+  else if(f !== "all")      l = l.filter(sh => sh.userStatus === f);
 
+  const q = norm(state.ql).trim();
+  if(q) l = l.filter(sh => norm(sh.name).includes(q));
+  if(state.genre)      l = l.filter(sh => (sh.genres || []).includes(state.genre));
+  if(state.plateforme) l = l.filter(sh => (sh.network || "—") === state.plateforme);
+  if(state.diffusion === "running") l = l.filter(sh => sh.status === "Running");
+  if(state.diffusion === "ended")   l = l.filter(sh => sh.status !== "Running");
+
+  /* --- tri --- */
   const t = state.tri;
-  l.sort((a, b) => t === "az" ? a.name.localeCompare(b.name)
-    : t === "progress" ? avancement(b).pct - avancement(a).pct
-    : t === "added" ? (b.addedAt || 0) - (a.addedAt || 0)
-    : String(prochainAVoir(b) ? prochainAVoir(b).d : "0").localeCompare(String(prochainAVoir(a) ? prochainAVoir(a).d : "0")) || a.name.localeCompare(b.name));
+  const dNext = sh => { const e = prochainAVoir(sh); return e ? String(e.d) : "0"; };
+  l = l.slice().sort((a, b) =>
+      t === "az"       ? a.name.localeCompare(b.name)
+    : t === "progress" ? avancement(b).pct - avancement(a).pct || a.name.localeCompare(b.name)
+    : t === "added"    ? (b.addedAt || 0) - (a.addedAt || 0)
+    : t === "reste"    ? (tempsRestant(a) || 9e9) - (tempsRestant(b) || 9e9) || a.name.localeCompare(b.name)
+    : t === "long"     ? tempsRestant(b) - tempsRestant(a) || a.name.localeCompare(b.name)
+    : dNext(b).localeCompare(dNext(a)) || a.name.localeCompare(b.name));
 
-  const chips = '<div class="chips" style="margin-top:14px">' + FILTRES.map(x =>
+  /* --- facettes calculées sur la bibliothèque entière --- */
+  const compte = (cle) => {
+    const m = new Map();
+    tout.forEach(sh => (cle === "genre" ? (sh.genres || []) : [sh.network || "—"])
+      .forEach(x => m.set(x, (m.get(x) || 0) + 1)));
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  };
+  const actifs = (state.genre ? 1 : 0) + (state.plateforme ? 1 : 0) + (state.diffusion ? 1 : 0);
+
+  /* --- barre de recherche --- */
+  const barre = '<div style="padding-top:14px"></div><div class="search">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+    '<input id="ql" type="search" placeholder="Filtrer par titre…" autocomplete="off" value="' + esc(state.ql) + '">' +
+    (state.ql ? '<button class="btn sm" data-act="vider-ql">Effacer</button>' : "") +
+    '<button class="btn sm ' + (state.panneau || actifs ? "pri" : "") + '" data-act="panneau">Filtres' +
+      (actifs ? " · " + actifs : "") + '</button></div>';
+
+  /* --- panneau de facettes --- */
+  const facette = (cle, sel, liste, titre) =>
+    '<div class="eyebrow" style="margin:14px 0 8px">' + titre + '</div><div class="chips" style="flex-wrap:wrap">' +
+    liste.slice(0, 24).map(([k, v]) =>
+      '<button class="chip ' + (sel === k ? "on" : "") + '" data-act="' + cle + '" data-id="' + esc(k) + '">' +
+      esc(k) + ' <b class="mono" style="opacity:.6">' + v + '</b></button>').join("") + '</div>';
+
+  const panneau = state.panneau ? '<div class="box" style="margin-top:9px">' +
+      facette("genre", state.genre, compte("genre"), "Genre") +
+      facette("plateforme", state.plateforme, compte("network"), "Chaîne ou plateforme") +
+      '<div class="eyebrow" style="margin:14px 0 8px">Diffusion</div><div class="chips">' +
+        [["", "Peu importe"], ["running", "En production"], ["ended", "Terminée"]].map(([k, lb]) =>
+          '<button class="chip ' + ((state.diffusion || "") === k ? "on" : "") + '" data-act="diffusion" data-id="' + k + '">' + lb + '</button>').join("") +
+      '</div>' +
+      (actifs ? '<button class="btn full" style="margin-top:14px" data-act="reset-filtres">Retirer les filtres</button>' : "") +
+    '</div>' : "";
+
+  /* --- chips de statut et de tri --- */
+  const chips = '<div class="chips" style="margin-top:10px">' + FILTRES.map(x =>
     '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
 
   const tris = '<div class="chips" style="margin-top:6px">' +
-    [["recent","Diffusion"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]].map(([id, lb]) =>
-      '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
+    [["recent","Diffusion"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
+      .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
 
-  if(!Object.keys(DB.shows).length)
-    return chips + '<div class="empty"><h3>Liste vide</h3><p>Ajoute une première série pour démarrer.</p>' +
-      '<button class="btn pri" data-act="go-search">Chercher une série</button></div>';
-
+  /* --- corps --- */
+  const resteTotal = l.reduce((x, sh) => x + tempsRestant(sh), 0);
+  const vus = l.slice(0, state.limite);
   const corps = l.length
-    ? '<div class="stack">' + l.map(carteSerie).join("") + '</div>'
-    : '<div class="empty"><p>Aucune série dans ce filtre.</p></div>';
+    ? '<div class="stack">' + vus.map(carteSerie).join("") + '</div>' +
+      (l.length > vus.length
+        ? '<button class="btn full" style="margin-top:12px" data-act="plus">Afficher ' +
+          Math.min(PAGE, l.length - vus.length) + ' séries de plus <span class="mono" style="color:var(--gris)">(' +
+          vus.length + '/' + l.length + ')</span></button>' : "")
+    : '<div class="empty"><h3>Aucun résultat</h3><p>Aucune série ne correspond à ces critères.</p>' +
+      (actifs || q ? '<button class="btn" data-act="reset-filtres">Retirer les filtres</button>' : "") + '</div>';
 
-  return chips + tris + '<div class="eyebrow">' + (FILTRES.find(x => x.id === f) || {}).l + ' <b>' + l.length + '</b></div>' + corps;
+  const titre = q ? 'Titres contenant « ' + esc(state.ql.trim()) + ' »'
+                  : (FILTRES.find(x => x.id === f) || {}).l;
+
+  return barre + panneau + chips + tris +
+    '<div class="eyebrow">' + titre + ' <b>' + l.length + '</b>' +
+      (resteTotal ? '<span style="color:var(--signal);letter-spacing:.04em">reste ' + dureeLongue(resteTotal) + '</span>' : "") +
+    '</div>' + corps;
 }
 
 /* ---------- vue : Agenda ---------- */
@@ -831,7 +917,9 @@ function vueFiche(sh){
          sh.network, sh.runtime ? sh.runtime + " min" : "", (sh.genres || []).slice(0, 3).join(", ")]
         .filter(Boolean).map(esc).join(" · ") + '</div>' +
       bande(sh) +
-      '<div class="stripmeta"><span>' + a.watched + '/' + a.total + ' épisodes</span><span>' + a.pct + ' % vus</span></div>' +
+      '<div class="stripmeta"><span>' + a.watched + '/' + a.total + ' épisodes</span>' +
+      (tempsRestant(sh) ? '<span style="color:var(--signal)">reste ' + dureeLongue(tempsRestant(sh)) + '</span>' : "") +
+      '<span>' + a.pct + ' % vus</span></div>' +
       '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage' +
       (P > 1 ? ' · <span style="color:var(--signal)">passage ' + P + '</span>' : "") + '</div>' +
       '</div></div>' +
@@ -944,8 +1032,21 @@ document.addEventListener("click", async ev => {
   }
   if(act === "go-search"){ state.cherche = true; render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return; }
   if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; render(); return; }
-  if(act === "filtre"){ state.filtre = id; render(); return; }
-  if(act === "tri"){ state.tri = id; render(); return; }
+  if(act === "filtre"){ state.filtre = id; state.limite = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "tri"){ state.tri = id; state.limite = PAGE; render(); return; }
+  if(act === "panneau"){ state.panneau = !state.panneau; render(); return; }
+  if(act === "genre"){ state.genre = state.genre === id ? "" : id; state.limite = PAGE; render(); return; }
+  if(act === "plateforme"){ state.plateforme = state.plateforme === id ? "" : id; state.limite = PAGE; render(); return; }
+  if(act === "diffusion"){ state.diffusion = id; state.limite = PAGE; render(); return; }
+  if(act === "reset-filtres"){
+    state.genre = state.plateforme = state.diffusion = state.ql = "";
+    state.limite = PAGE; render(); toast("Filtres retirés"); return;
+  }
+  if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
+  if(act === "plus"){
+    state.limite += PAGE;
+    const y = window.scrollY; render(); window.scrollTo(0, y); return;
+  }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "close-sheet"){ history.back(); return; }
@@ -1045,6 +1146,19 @@ document.addEventListener("toggle", ev => {
 }, true);
 
 /* ---------- recherche live ---------- */
+let _ql;
+document.addEventListener("input", ev => {
+  if(ev.target.id !== "ql") return;
+  state.ql = ev.target.value; state.limite = PAGE;
+  clearTimeout(_ql);
+  _ql = setTimeout(() => {
+    const pos = ev.target.selectionStart;
+    render();
+    const el = $("#ql");
+    if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(e){} }
+  }, 180);
+});
+
 let _q;
 document.addEventListener("input", ev => {
   if(ev.target.id !== "q") return;
