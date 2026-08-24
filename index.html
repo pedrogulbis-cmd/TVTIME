@@ -1,0 +1,1122 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=5">
+<meta name="theme-color" content="#17131f">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="description" content="Suivi de séries personnel, hors ligne, données locales.">
+<title>Antenne — suivi de séries</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2317131f'/%3E%3Cpath d='M16 20V11M16 11l-6-4M16 11l6-4' stroke='%23ff7a45' stroke-width='2.4' stroke-linecap='round'/%3E%3Crect x='10' y='20' width='12' height='4' rx='1.6' fill='%237ee0b8'/%3E%3C/svg%3E">
+<style>
+:root{
+  --encre:#17131f;      /* fond, encre violette */
+  --carte:#211b2c;
+  --carte2:#2b2338;
+  --trait:#3a3049;
+  --papier:#f0eae0;     /* texte, papier magazine */
+  --gris:#9b93a8;
+  --signal:#ff7a45;     /* orange antenne */
+  --vu:#7ee0b8;         /* mint, épisode vu */
+  --rouge:#ff5f6d;
+  --r:12px;
+  --tab:calc(60px + env(safe-area-inset-bottom));
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{
+  background:var(--encre);color:var(--papier);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:15px;line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+  overscroll-behavior-y:none;
+}
+body::before{ /* grain de diffusion très léger */
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:0;opacity:.035;
+  background-image:repeating-linear-gradient(0deg,#fff 0 1px,transparent 1px 3px);
+}
+button,input,select,textarea{font:inherit;color:inherit}
+button{background:none;border:0;cursor:pointer;padding:0}
+a{color:var(--signal)}
+h1,h2,h3{font-family:Archivo,system-ui,sans-serif;font-weight:700;margin:0;letter-spacing:-.02em}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+
+/* ------------ ossature ------------- */
+.wrap{max-width:680px;margin:0 auto;padding:0 14px calc(var(--tab) + 24px);position:relative;z-index:1}
+header.top{
+  position:sticky;top:0;z-index:30;background:rgba(23,19,31,.92);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--trait);
+  padding-top:env(safe-area-inset-top);
+}
+.top-in{max-width:680px;margin:0 auto;padding:10px 14px;display:flex;align-items:center;gap:10px}
+.mark{display:flex;align-items:center;gap:8px;font-family:Archivo;font-weight:700;
+  font-size:17px;letter-spacing:.14em;text-transform:uppercase}
+.mark svg{display:block}
+.top-sp{flex:1}
+.iconbtn{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+  background:var(--carte);border:1px solid var(--trait);color:var(--papier)}
+.iconbtn:active{background:var(--carte2)}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:11px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--gris);display:flex;align-items:center;gap:8px;margin:22px 0 10px}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--trait)}
+.eyebrow b{color:var(--signal);font-weight:600}
+
+/* ------------ barre d'onglets ------------- */
+nav.tabs{
+  position:fixed;left:0;right:0;bottom:0;z-index:40;
+  background:rgba(23,19,31,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border-top:1px solid var(--trait);padding-bottom:env(safe-area-inset-bottom);
+}
+.tabs-in{max-width:680px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr)}
+.tab{padding:8px 0 7px;display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--gris);
+  font-family:"IBM Plex Mono",monospace;font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;
+  border-top:2px solid transparent;margin-top:-1px}
+.tab.on{color:var(--papier);border-top-color:var(--signal)}
+.tab.on svg{color:var(--signal)}
+.tab .badge{position:absolute;transform:translate(14px,-6px);background:var(--signal);color:#2a1206;
+  border-radius:9px;padding:0 5px;font-size:9px;font-weight:600;line-height:14px}
+.tab-wrap{position:relative;display:flex}
+
+/* ------------ cartes ------------- */
+.card{background:var(--carte);border:1px solid var(--trait);border-radius:var(--r);overflow:hidden}
+.row{display:flex;gap:12px;padding:11px;align-items:flex-start;width:100%;text-align:left}
+.poster{width:58px;height:84px;border-radius:7px;background:var(--carte2) center/cover no-repeat;
+  flex:0 0 58px;position:relative;overflow:hidden}
+.poster.lg{width:104px;height:150px;flex:0 0 104px}
+.poster::after{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 1px rgba(240,234,224,.08);border-radius:7px}
+.ph{display:grid;place-items:center;color:var(--trait);font-family:Archivo;font-size:22px;font-weight:700;height:100%}
+.info{min-width:0;flex:1}
+.title{font-family:Archivo;font-weight:600;font-size:15.5px;line-height:1.2;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.sub{color:var(--gris);font-size:12.5px;margin-top:3px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.code{font-family:"IBM Plex Mono",monospace;font-size:11.5px;font-weight:600;letter-spacing:.04em;
+  background:var(--carte2);border:1px solid var(--trait);color:var(--papier);
+  padding:1px 6px;border-radius:5px;display:inline-block}
+.code.next{background:rgba(255,122,69,.14);border-color:rgba(255,122,69,.42);color:var(--signal)}
+.code.vu{background:rgba(126,224,184,.12);border-color:rgba(126,224,184,.35);color:var(--vu)}
+
+/* ------------ SIGNATURE : la grille de diffusion ------------- */
+.strip{display:flex;gap:1.5px;height:7px;margin-top:9px;border-radius:2px;overflow:hidden}
+.strip i{flex:1 1 0;min-width:1.5px;background:var(--trait);border-radius:1px}
+.strip i.a{background:#4a3f5e}                 /* diffusé, pas vu */
+.strip i.w{background:var(--vu)}               /* vu */
+.strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,#4a3f5e 50% 100%)} /* partiel */
+.strip i.f{background:#2e2740}                 /* à venir */
+.stripmeta{display:flex;justify-content:space-between;gap:8px;margin-top:6px;
+  font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);letter-spacing:.03em}
+
+/* ------------ boutons ------------- */
+.check{flex:0 0 auto;width:44px;height:44px;border-radius:50%;border:1.5px solid var(--trait);
+  display:grid;place-items:center;color:var(--gris);align-self:center;background:var(--carte2)}
+.check.on{background:var(--vu);border-color:var(--vu);color:#12352a}
+.check:active{transform:scale(.92)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:11px 15px;
+  border-radius:10px;background:var(--carte2);border:1px solid var(--trait);
+  font-weight:600;font-size:14px}
+.btn:active{background:var(--trait)}
+.btn.pri{background:var(--signal);border-color:var(--signal);color:#2a1206}
+.btn.dgr{color:var(--rouge);border-color:rgba(255,95,109,.35)}
+.btn.full{width:100%}
+.btn.sm{padding:7px 11px;font-size:12.5px;border-radius:8px}
+.chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-ms-overflow-style:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{white-space:nowrap;padding:6px 12px;border-radius:20px;background:var(--carte);
+  border:1px solid var(--trait);color:var(--gris);font-size:12.5px;font-weight:500}
+.chip.on{background:var(--papier);border-color:var(--papier);color:var(--encre);font-weight:600}
+.stack{display:flex;flex-direction:column;gap:9px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+
+/* ------------ recherche ------------- */
+.search{display:flex;align-items:center;gap:9px;background:var(--carte);border:1px solid var(--trait);
+  border-radius:11px;padding:0 12px}
+.search input{flex:1;background:none;border:0;outline:none;padding:12px 0;font-size:16px}
+.search input::placeholder{color:var(--gris)}
+
+/* ------------ fiche série ------------- */
+.sheet{position:fixed;inset:0;z-index:60;background:var(--encre);overflow-y:auto;
+  overscroll-behavior:contain;animation:up .22s cubic-bezier(.2,.8,.3,1)}
+@keyframes up{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
+.hero{position:relative;padding:calc(env(safe-area-inset-top) + 14px) 14px 16px;
+  background:linear-gradient(180deg,var(--carte) 0%,var(--encre) 100%);
+  border-bottom:1px solid var(--trait)}
+.hero .row{padding:0}
+.sheetnav{position:sticky;top:0;z-index:5;display:flex;gap:8px;align-items:center;
+  padding:calc(env(safe-area-inset-top) + 8px) 14px 8px;background:rgba(23,19,31,.92);
+  backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--trait)}
+.seg{display:flex;background:var(--carte);border:1px solid var(--trait);border-radius:10px;padding:3px;gap:3px}
+.seg button{flex:1;padding:8px 4px;border-radius:7px;font-size:12px;font-weight:600;color:var(--gris)}
+.seg button.on{background:var(--carte2);color:var(--papier);box-shadow:0 1px 0 rgba(0,0,0,.3)}
+.season{border:1px solid var(--trait);border-radius:var(--r);overflow:hidden;background:var(--carte)}
+.season>summary{list-style:none;padding:12px;display:flex;align-items:center;gap:10px;cursor:pointer}
+.season>summary::-webkit-details-marker{display:none}
+.season[open]>summary{border-bottom:1px solid var(--trait)}
+.season h3{font-size:14px;flex:1}
+.ep{display:flex;align-items:center;gap:10px;padding:9px 11px;border-top:1px solid rgba(58,48,73,.5)}
+.ep:first-child{border-top:0}
+.ep .info{font-size:13.5px}
+.ep .t{font-size:13.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ep.done .t{color:var(--gris)}
+.epchk{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--trait);flex:0 0 34px;
+  display:grid;place-items:center;color:var(--gris);background:var(--carte2)}
+.epchk.on{background:var(--vu);border-color:var(--vu);color:#12352a}
+.upto{width:30px;height:30px;border-radius:8px;flex:0 0 30px;display:grid;place-items:center;
+  color:var(--gris);border:1px solid var(--trait)}
+.summary{color:var(--gris);font-size:13.5px;line-height:1.6}
+
+/* ------------ stats ------------- */
+.stat{background:var(--carte);border:1px solid var(--trait);border-radius:var(--r);padding:13px}
+.stat .n{font-family:"IBM Plex Mono",monospace;font-size:27px;font-weight:600;letter-spacing:-.03em;line-height:1.1}
+.stat .l{font-family:"IBM Plex Mono",monospace;font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--gris);margin-top:5px}
+.bar{display:flex;align-items:center;gap:9px;padding:7px 0}
+.bar .lb{width:34%;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .tr{flex:1;height:8px;background:var(--carte2);border-radius:4px;overflow:hidden}
+.bar .fl{height:100%;background:var(--signal);border-radius:4px}
+.bar .vl{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--gris);min-width:48px;text-align:right}
+.spark{display:flex;align-items:flex-end;gap:3px;height:74px;margin-top:6px}
+.spark div{flex:1;background:var(--carte2);border-radius:3px 3px 0 0;position:relative;min-height:2px}
+.spark div.hot{background:var(--signal)}
+.sparkx{display:flex;gap:3px;margin-top:5px}
+.sparkx span{flex:1;text-align:center;font-family:"IBM Plex Mono",monospace;font-size:8.5px;color:var(--gris)}
+
+/* ------------ divers ------------- */
+.empty{text-align:center;padding:44px 18px;color:var(--gris)}
+.empty h3{font-size:17px;color:var(--papier);margin-bottom:7px}
+.empty p{margin:0 0 16px;font-size:13.5px}
+.toast{position:fixed;left:50%;bottom:calc(var(--tab) + 14px);transform:translateX(-50%) translateY(70px);
+  background:var(--papier);color:var(--encre);padding:10px 16px;border-radius:10px;font-size:13.5px;
+  font-weight:600;z-index:90;opacity:0;transition:.24s;max-width:88vw;text-align:center;pointer-events:none}
+.toast.on{transform:translateX(-50%);opacity:1}
+.note{font-size:12.5px;color:var(--gris);line-height:1.55}
+.box{background:var(--carte);border:1px solid var(--trait);border-radius:var(--r);padding:13px}
+.box h3{font-size:14px;margin-bottom:4px}
+.log{font-family:"IBM Plex Mono",monospace;font-size:11.5px;color:var(--gris);
+  max-height:190px;overflow-y:auto;white-space:pre-wrap;line-height:1.6;margin-top:9px}
+.pgt{height:5px;background:var(--carte2);border-radius:3px;overflow:hidden;margin-top:9px}
+.pgt i{display:block;height:100%;background:var(--signal);width:0;transition:width .2s}
+textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);border-radius:9px;
+  padding:10px;color:var(--papier);font-size:14px;resize:vertical;outline:none}
+.sw{display:flex;align-items:center;gap:12px;padding:11px 0;border-top:1px solid var(--trait)}
+.sw:first-of-type{border-top:0}
+.sw .info{font-size:13.5px}
+.tg{width:46px;height:27px;border-radius:14px;background:var(--carte2);border:1px solid var(--trait);
+  flex:0 0 46px;position:relative;transition:.16s}
+.tg::after{content:"";position:absolute;top:2px;left:2px;width:21px;height:21px;border-radius:50%;
+  background:var(--gris);transition:.16s}
+.tg.on{background:rgba(126,224,184,.24);border-color:var(--vu)}
+.tg.on::after{left:22px;background:var(--vu)}
+.hide{display:none!important}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+:focus-visible{outline:2px solid var(--signal);outline-offset:2px;border-radius:6px}
+@media(min-width:520px){.poster{width:70px;height:101px;flex:0 0 70px}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-in">
+    <div class="mark">
+      <svg width="20" height="20" viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path d="M16 21V12M16 12 9 7M16 12l7-5" stroke="#ff7a45" stroke-width="2.6" stroke-linecap="round"/>
+        <rect x="9" y="21" width="14" height="5" rx="2" fill="#7ee0b8"/>
+      </svg>
+      Antenne
+    </div>
+    <div class="top-sp"></div>
+    <button class="iconbtn" data-act="go-search" aria-label="Rechercher une série">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="wrap" id="view"></main>
+
+<nav class="tabs">
+  <div class="tabs-in" id="tabs"></div>
+</nav>
+
+<div id="sheet"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+/* ============================================================
+   Antenne — suivi de séries personnel
+   Données : TVmaze (libre, sans clé). Stockage : localStorage.
+   ============================================================ */
+
+const API = "https://api.tvmaze.com";
+const LS  = "antenne.v1";
+
+/* ---------- utilitaires ---------- */
+const $ = s => document.querySelector(s);
+const p2 = n => String(n).padStart(2, "0");
+const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const strip = h => { const d = document.createElement("div"); d.innerHTML = h || ""; return (d.textContent || "").trim(); };
+const todayISO = () => { const d = new Date(); return d.getFullYear() + "-" + p2(d.getMonth()+1) + "-" + p2(d.getDate()); };
+const MOIS = ["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"];
+const JOURS = ["dim","lun","mar","mer","jeu","ven","sam"];
+
+function frDate(iso){
+  if(!iso) return "date inconnue";
+  const d = new Date(iso + "T12:00:00");
+  if(isNaN(d)) return iso;
+  return JOURS[d.getDay()] + " " + d.getDate() + " " + MOIS[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "");
+}
+function relDate(iso){
+  if(!iso) return "date inconnue";
+  const a = new Date(iso + "T12:00:00"), b = new Date(todayISO() + "T12:00:00");
+  const j = Math.round((a - b) / 86400000);
+  if(j === 0) return "aujourd'hui";
+  if(j === 1) return "demain";
+  if(j === -1) return "hier";
+  if(j < 0 && j > -7) return "il y a " + (-j) + " jours";
+  if(j > 0 && j < 7)  return "dans " + j + " jours";
+  return frDate(iso);
+}
+function dureeLongue(min){
+  if(!min) return "0 h";
+  const j = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  if(j) return j + " j " + h + " h";
+  if(h) return h + " h " + p2(m);
+  return m + " min";
+}
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), 2400);
+}
+
+/* ---------- file d'attente réseau (respect du quota TVmaze) ---------- */
+const net = (() => {
+  const q = []; let busy = false, last = 0; const GAP = 520;
+  async function pump(){
+    if(busy || !q.length) return;
+    busy = true;
+    const job = q.shift();
+    const w = GAP - (Date.now() - last);
+    if(w > 0) await sleep(w);
+    last = Date.now();
+    try{
+      const r = await fetch(job.url, { headers:{ Accept:"application/json" } });
+      if(r.status === 429){ q.unshift(job); busy = false; await sleep(2600); return pump(); }
+      if(r.status === 404){ job.res(null); }
+      else if(!r.ok){ job.rej(new Error("HTTP " + r.status)); }
+      else { job.res(await r.json()); }
+    }catch(e){ job.rej(e); }
+    busy = false; pump();
+  }
+  return { get: url => new Promise((res, rej) => { q.push({ url, res, rej }); pump(); }) };
+})();
+
+/* ---------- stockage ---------- */
+const DEFAULTS = { version:1, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false }, meta:{ created:Date.now() } };
+let DB = charger();
+
+function charger(){
+  try{
+    const raw = localStorage.getItem(LS);
+    if(raw){
+      const d = JSON.parse(raw);
+      return { ...DEFAULTS, ...d, settings:{ ...DEFAULTS.settings, ...(d.settings||{}) }, shows:d.shows||{}, watched:d.watched||{} };
+    }
+  }catch(e){ console.warn("lecture localStorage", e); }
+  return JSON.parse(JSON.stringify(DEFAULTS));
+}
+let _sv;
+function sauver(){
+  clearTimeout(_sv);
+  _sv = setTimeout(() => {
+    try{ localStorage.setItem(LS, JSON.stringify(DB)); }
+    catch(e){ toast("Stockage plein — exporte puis allège ta liste"); }
+  }, 120);
+}
+function poids(){ try{ return new Blob([JSON.stringify(DB)]).size; }catch(e){ return 0; } }
+
+/* ---------- modèle ---------- */
+function normShow(s){
+  return {
+    id:s.id, name:s.name || "Sans titre",
+    poster:s.image ? (s.image.medium || s.image.original) : null,
+    premiered:s.premiered || null, ended:s.ended || null, status:s.status || "",
+    network:(s.network && s.network.name) || (s.webChannel && s.webChannel.name) || "",
+    runtime:s.averageRuntime || s.runtime || null,
+    genres:s.genres || [], summary:strip(s.summary), lang:s.language || "",
+    tvdb:(s.externals && s.externals.thetvdb) || null,
+    imdb:(s.externals && s.externals.imdb) || null,
+    url:s.url || null
+  };
+}
+function normEps(list){
+  return (list || []).map(e => ({
+    i:e.id, s:e.season == null ? 0 : e.season, n:e.number,
+    t:e.name || "", d:e.airdate || null, r:e.runtime || null,
+    sp:(e.type && e.type !== "regular") || e.number == null ? 1 : 0
+  })).sort((a, b) => a.s - b.s || (a.n ?? 999) - (b.n ?? 999) || String(a.d).localeCompare(String(b.d)));
+}
+async function fetchShow(id){
+  const raw = await net.get(API + "/shows/" + id + "?embed=episodes");
+  if(!raw) return null;
+  const sh = normShow(raw);
+  sh.eps = normEps(raw._embedded && raw._embedded.episodes);
+  return sh;
+}
+function ajouterShow(sh, statut){
+  const old = DB.shows[sh.id] || {};
+  DB.shows[sh.id] = {
+    ...sh,
+    userStatus: statut || old.userStatus || "watching",
+    favorite: old.favorite || false,
+    addedAt: old.addedAt || Date.now(),
+    lastFetched: Date.now()
+  };
+  sauver();
+}
+function retirerShow(id){
+  const sh = DB.shows[id];
+  if(sh) (sh.eps || []).forEach(e => { delete DB.watched[e.i]; });
+  delete DB.shows[id];
+  sauver();
+}
+const epsOf = sh => (sh.eps || []).filter(e => DB.settings.specials || !e.sp);
+const diffuse = e => !!e.d && e.d <= todayISO();
+const vu = e => !!DB.watched[e.i];
+
+function avancement(sh){
+  const eps = epsOf(sh);
+  const air = eps.filter(diffuse);
+  const w = eps.filter(vu);
+  return { total:eps.length, aired:air.length, watched:w.length,
+           pct: air.length ? Math.round(w.filter(diffuse).length / air.length * 100) : 0 };
+}
+function prochainAVoir(sh){ return epsOf(sh).find(e => diffuse(e) && !vu(e)) || null; }
+function prochaineDiffusion(sh){ return epsOf(sh).find(e => e.d && e.d > todayISO()) || null; }
+function tempsVu(sh){
+  return epsOf(sh).filter(vu).reduce((t, e) => t + (e.r || sh.runtime || 42), 0);
+}
+function marquer(ep, on){
+  if(on) DB.watched[ep.i] = new Date().toISOString();
+  else delete DB.watched[ep.i];
+  sauver();
+}
+function marquerJusqua(sh, ep){
+  const eps = epsOf(sh);
+  const idx = eps.findIndex(e => e.i === ep.i);
+  eps.slice(0, idx + 1).filter(diffuse).forEach(e => { if(!vu(e)) DB.watched[e.i] = new Date().toISOString(); });
+  sauver();
+}
+function autoStatut(sh){
+  const a = avancement(sh);
+  if(a.aired && a.pct === 100 && (sh.status === "Ended" || sh.status === "Canceled") && !prochaineDiffusion(sh))
+    sh.userStatus = "completed";
+}
+
+/* ---------- icônes ---------- */
+const ICO = {
+  play:'<path d="M5 3.5v17l14-8.5z"/>',
+  list:'<path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>',
+  cal :'<rect x="3" y="5" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>',
+  cog :'<circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+  check:'<path d="m4 12.5 5.2 5.2L20 7" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+  back:'<path d="M15 19 8 12l7-7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+  down:'<path d="M12 4v12m0 0 5-5m-5 5-5-5M4 20h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>'
+};
+const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICO[k] + '</svg>';
+
+/* ---------- état de navigation ---------- */
+const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false, saison:null };
+
+const TABS = [
+  { id:"upnext",  l:"À suivre", i:"play" },
+  { id:"library", l:"Ma liste", i:"list" },
+  { id:"agenda",  l:"Agenda",   i:"cal" },
+  { id:"stats",   l:"Stats",    i:"chart" },
+  { id:"reglages",l:"Réglages", i:"cog" }
+];
+
+/* ============================================================
+   RENDU
+   ============================================================ */
+function render(){
+  $("#tabs").innerHTML = TABS.map(t => {
+    const n = t.id === "upnext" ? listeASuivre().length : 0;
+    return '<button class="tab tab-wrap ' + (state.tab === t.id ? "on" : "") + '" data-act="tab" data-id="' + t.id + '">' +
+      '<span style="position:relative;display:flex">' + svg(t.i, 20) +
+      (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + '</span>' : "") + '</span>' +
+      '<span>' + t.l + '</span></button>';
+  }).join("");
+
+  const v = $("#view");
+  if(state.cherche)               v.innerHTML = vueRecherche();
+  else if(state.tab === "upnext")   v.innerHTML = vueASuivre();
+  else if(state.tab === "library")  v.innerHTML = vueListe();
+  else if(state.tab === "agenda")   v.innerHTML = vueAgenda();
+  else if(state.tab === "stats")    v.innerHTML = vueStats();
+  else                              v.innerHTML = vueReglages();
+
+  $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail]) : "";
+  document.body.style.overflow = state.detail ? "hidden" : "";
+}
+
+/* ---------- bandes de diffusion (élément signature) ---------- */
+function bande(sh){
+  const eps = epsOf(sh);
+  if(!eps.length) return "";
+  const MAX = 92;
+  const etat = eps.map(e => vu(e) ? 2 : (diffuse(e) ? 1 : 0));
+  let cells;
+  if(etat.length <= MAX) cells = etat.map(x => x === 2 ? "w" : x === 1 ? "a" : "f");
+  else{
+    const k = Math.ceil(etat.length / MAX); cells = [];
+    for(let i = 0; i < etat.length; i += k){
+      const c = etat.slice(i, i + k);
+      const w = c.filter(x => x === 2).length;
+      cells.push(w === c.length ? "w" : w ? "p" : (c.some(x => x === 1) ? "a" : "f"));
+    }
+  }
+  return '<div class="strip" aria-hidden="true">' + cells.map(c => '<i class="' + c + '"></i>').join("") + '</div>';
+}
+
+/* ---------- carte série ---------- */
+function affiche(sh, cls){
+  const c = cls || "";
+  return sh.poster
+    ? '<div class="poster ' + c + '" style="background-image:url(' + esc(sh.poster) + ')"></div>'
+    : '<div class="poster ' + c + '"><div class="ph">' + esc((sh.name || "?")[0].toUpperCase()) + '</div></div>';
+}
+
+function carteSerie(sh){
+  const a = avancement(sh);
+  const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
+  let ligne;
+  if(nx) ligne = '<span class="code next">S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span> ' + esc(nx.t || "");
+  else if(up) ligne = 'À jour · retour ' + relDate(up.d);
+  else if(a.total && a.watched === a.total) ligne = 'Terminée';
+  else ligne = 'À jour';
+  return '<button class="card row" data-act="open" data-id="' + sh.id + '">' +
+    affiche(sh) +
+    '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
+    '<div class="sub">' + ligne + '</div>' + bande(sh) +
+    '<div class="stripmeta"><span>' + a.watched + '/' + a.aired + ' vus</span><span>' + a.pct + ' %</span></div>' +
+    '</div></button>';
+}
+
+/* ---------- vue : À suivre ---------- */
+function listeASuivre(){
+  return Object.values(DB.shows)
+    .filter(sh => sh.userStatus === "watching" || sh.userStatus === "planned")
+    .map(sh => ({ sh, ep: prochainAVoir(sh) }))
+    .filter(x => x.ep)
+    .sort((a, b) => String(b.ep.d).localeCompare(String(a.ep.d)));
+}
+function vueASuivre(){
+  const l = listeASuivre();
+  const rien = Object.keys(DB.shows).length === 0;
+  if(rien) return '<div class="empty" style="padding-top:64px">' +
+    '<h3>Commence ta collection</h3><p>Cherche une série, ajoute-la, coche tes épisodes.<br>Tout reste sur ton téléphone.</p>' +
+    '<button class="btn pri" data-act="go-search">Chercher une série</button></div>';
+  if(!l.length) return '<div class="empty"><h3>Tu es à jour</h3><p>Aucun épisode diffusé en attente.</p>' +
+    '<button class="btn" data-act="tab" data-id="agenda">Voir ce qui arrive</button></div>';
+
+  const enRetard = l.filter(x => { const d = new Date(x.ep.d + "T12:00:00"); return (Date.now() - d) > 21 * 86400000; });
+  const frais = l.filter(x => !enRetard.includes(x));
+
+  const bloc = (arr, titre, n) => arr.length ? '<div class="eyebrow">' + titre + ' <b>' + n + '</b></div><div class="stack">' +
+    arr.map(x => carteEpisode(x.sh, x.ep)).join("") + '</div>' : "";
+
+  return bloc(frais, "À regarder", frais.length) + bloc(enRetard, "En retard", enRetard.length);
+}
+function carteEpisode(sh, ep){
+  return '<div class="card" style="display:flex">' +
+    '<button class="row" style="flex:1;min-width:0" data-act="open" data-id="' + sh.id + '">' +
+      affiche(sh) +
+      '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(sh.name) + '</div>' +
+      '<div style="margin-top:5px"><span class="code next">S' + p2(ep.s) + 'E' + p2(ep.n || 0) + '</span></div>' +
+      '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(ep.t || "Épisode") + '</div>' +
+      '<div class="stripmeta"><span>' + relDate(ep.d) + '</span><span>' + (ep.r || sh.runtime || 42) + ' min</span></div>' +
+      '</div></button>' +
+    '<div style="display:grid;place-items:center;padding-right:11px">' +
+      '<button class="check" data-act="tick" data-id="' + sh.id + '" data-ep="' + ep.i + '" aria-label="Marquer vu">' + svg("check", 20) + '</button>' +
+    '</div></div>';
+}
+
+/* ---------- vue : Ma liste ---------- */
+const FILTRES = [
+  { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"late", l:"En retard" },
+  { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
+  { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }
+];
+function vueListe(){
+  let l = Object.values(DB.shows);
+  const f = state.filtre;
+  if(f === "late")      l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
+  else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
+  else if(f !== "all")  l = l.filter(sh => sh.userStatus === f);
+
+  const t = state.tri;
+  l.sort((a, b) => t === "az" ? a.name.localeCompare(b.name)
+    : t === "progress" ? avancement(b).pct - avancement(a).pct
+    : t === "added" ? (b.addedAt || 0) - (a.addedAt || 0)
+    : String(prochainAVoir(b) ? prochainAVoir(b).d : "0").localeCompare(String(prochainAVoir(a) ? prochainAVoir(a).d : "0")) || a.name.localeCompare(b.name));
+
+  const chips = '<div class="chips" style="margin-top:14px">' + FILTRES.map(x =>
+    '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
+
+  const tris = '<div class="chips" style="margin-top:6px">' +
+    [["recent","Diffusion"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]].map(([id, lb]) =>
+      '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
+
+  if(!Object.keys(DB.shows).length)
+    return chips + '<div class="empty"><h3>Liste vide</h3><p>Ajoute une première série pour démarrer.</p>' +
+      '<button class="btn pri" data-act="go-search">Chercher une série</button></div>';
+
+  const corps = l.length
+    ? '<div class="stack">' + l.map(carteSerie).join("") + '</div>'
+    : '<div class="empty"><p>Aucune série dans ce filtre.</p></div>';
+
+  return chips + tris + '<div class="eyebrow">' + (FILTRES.find(x => x.id === f) || {}).l + ' <b>' + l.length + '</b></div>' + corps;
+}
+
+/* ---------- vue : Agenda ---------- */
+function vueAgenda(){
+  const out = [];
+  Object.values(DB.shows).forEach(sh => {
+    if(sh.userStatus === "dropped") return;
+    epsOf(sh).forEach(e => { if(e.d && e.d >= todayISO()) out.push({ sh, e }); });
+  });
+  out.sort((a, b) => a.e.d.localeCompare(b.e.d) || a.sh.name.localeCompare(b.sh.name));
+  if(!out.length) return '<div class="empty" style="padding-top:60px"><h3>Rien de programmé</h3>' +
+    '<p>Aucune date de diffusion connue pour tes séries.</p></div>';
+
+  const t = todayISO();
+  const dans = j => { const d = new Date(t + "T12:00:00"); d.setDate(d.getDate() + j);
+    return d.getFullYear() + "-" + p2(d.getMonth()+1) + "-" + p2(d.getDate()); };
+  const s7 = dans(7), s30 = dans(31);
+  const groupes = [
+    ["Cette semaine", out.filter(x => x.e.d < s7)],
+    ["Ce mois-ci",    out.filter(x => x.e.d >= s7 && x.e.d < s30)],
+    ["Plus tard",     out.filter(x => x.e.d >= s30).slice(0, 60)]
+  ];
+  return groupes.filter(g => g[1].length).map(([titre, arr]) => {
+    let jour = "";
+    const lignes = arr.map(x => {
+      let h = "";
+      if(x.e.d !== jour){ jour = x.e.d;
+        h = '<div class="eyebrow" style="margin:14px 0 8px">' + (x.e.d === t ? "Aujourd'hui · " : "") + frDate(x.e.d) + '</div>'; }
+      return h + '<button class="card row" data-act="open" data-id="' + x.sh.id + '">' + affiche(x.sh) +
+        '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(x.sh.name) + '</div>' +
+        '<div style="margin-top:5px"><span class="code">S' + p2(x.e.s) + 'E' + p2(x.e.n || 0) + '</span></div>' +
+        '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(x.e.t || "Épisode") + '</div></div></button>';
+    }).join("");
+    return '<div class="eyebrow">' + titre + ' <b>' + arr.length + '</b></div><div class="stack">' + lignes + '</div>';
+  }).join("");
+}
+
+/* ---------- vue : Stats ---------- */
+function vueStats(){
+  const shows = Object.values(DB.shows);
+  if(!shows.length) return '<div class="empty" style="padding-top:60px"><h3>Pas encore de statistiques</h3>' +
+    '<p>Elles apparaîtront dès tes premiers épisodes cochés.</p></div>';
+
+  let mins = 0, nbVus = 0;
+  const parSerie = [];
+  shows.forEach(sh => { const m = tempsVu(sh); const n = epsOf(sh).filter(vu).length;
+    mins += m; nbVus += n; if(n) parSerie.push({ n:sh.name, m, e:n }); });
+  parSerie.sort((a, b) => b.m - a.m);
+  const finies = shows.filter(sh => sh.userStatus === "completed").length;
+
+  const cartes = [
+    [nbVus, "épisodes vus"], [dureeLongue(mins), "temps d'écran"],
+    [shows.length, "séries suivies"], [finies, "séries terminées"]
+  ].map(([n, l]) => '<div class="stat"><div class="n">' + esc(n) + '</div><div class="l">' + l + '</div></div>').join("");
+
+  // activité 12 mois
+  const mois = [];
+  const now = new Date();
+  for(let i = 11; i >= 0; i--){ const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    mois.push({ k:d.getFullYear() + "-" + p2(d.getMonth()+1), l:MOIS[d.getMonth()][0].toUpperCase(), v:0 }); }
+  const idx = Object.fromEntries(mois.map((m, i) => [m.k, i]));
+  Object.values(DB.watched).forEach(ts => { const k = String(ts).slice(0, 7); if(k in idx) mois[idx[k]].v++; });
+  const maxM = Math.max(1, ...mois.map(m => m.v));
+  const spark = '<div class="spark">' + mois.map(m =>
+    '<div class="' + (m.v === maxM && m.v ? "hot" : "") + '" style="height:' + Math.max(3, m.v / maxM * 100) + '%" title="' + m.v + '"></div>').join("") + '</div>' +
+    '<div class="sparkx">' + mois.map(m => '<span>' + m.l + '</span>').join("") + '</div>';
+
+  const maxS = parSerie.length ? parSerie[0].m : 1;
+  const top = parSerie.slice(0, 8).map(s => '<div class="bar"><div class="lb">' + esc(s.n) + '</div>' +
+    '<div class="tr"><div class="fl" style="width:' + (s.m / maxS * 100) + '%"></div></div>' +
+    '<div class="vl">' + dureeLongue(s.m) + '</div></div>').join("");
+
+  const g = {};
+  shows.forEach(sh => (sh.genres || []).forEach(x => { g[x] = (g[x] || 0) + 1; }));
+  const genres = Object.entries(g).sort((a, b) => b[1] - a[1]).slice(0, 10)
+    .map(([k, v]) => '<span class="chip">' + esc(k) + ' <b class="mono" style="color:var(--signal)">' + v + '</b></span>').join("");
+
+  return '<div class="eyebrow">Bilan</div><div class="grid2">' + cartes + '</div>' +
+    '<div class="eyebrow">Activité sur 12 mois</div><div class="box">' + spark + '</div>' +
+    (top ? '<div class="eyebrow">Temps par série</div><div class="box">' + top + '</div>' : "") +
+    (genres ? '<div class="eyebrow">Genres</div><div class="chips" style="flex-wrap:wrap">' + genres + '</div>' : "");
+}
+
+/* ---------- vue : Recherche ---------- */
+function vueRecherche(){
+  const res = state.res.map(sh => {
+    const dedans = !!DB.shows[sh.id];
+    return '<div class="card" style="display:flex">' +
+      '<button class="row" style="flex:1;min-width:0" data-act="preview" data-id="' + sh.id + '">' + affiche(sh) +
+      '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
+      '<div class="sub">' + [sh.premiered ? sh.premiered.slice(0, 4) : "", sh.network, (sh.genres || []).slice(0, 2).join(", ")]
+        .filter(Boolean).map(esc).join(" · ") + '</div></div></button>' +
+      '<div style="display:grid;place-items:center;padding-right:11px">' +
+        '<button class="check ' + (dedans ? "on" : "") + '" data-act="add" data-id="' + sh.id + '" aria-label="Ajouter">' +
+        (dedans ? svg("check", 20) : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>') +
+        '</button></div></div>';
+  }).join("");
+
+  return '<div style="padding-top:14px"></div>' +
+    '<div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+    '<input id="q" type="search" placeholder="Titre de série…" autocomplete="off" value="' + esc(state.q) + '">' +
+    '<button class="btn sm" data-act="close-search">Fermer</button></div>' +
+    (state.res.length ? '<div class="eyebrow">Résultats <b>' + state.res.length + '</b></div><div class="stack">' + res + '</div>'
+      : state.q.length > 1 ? '<div class="empty"><p>Aucune série trouvée. Essaie le titre original en anglais.</p></div>'
+      : '<div class="empty"><p>Tape un titre pour chercher dans le catalogue TVmaze.</p></div>');
+}
+
+/* ---------- vue : fiche série ---------- */
+const STATUTS = [["watching","En cours"],["planned","À voir"],["completed","Terminée"],["dropped","Abandonnée"]];
+function vueFiche(sh){
+  if(!sh) return "";
+  const a = avancement(sh);
+  const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
+  const saisons = [...new Set(epsOf(sh).map(e => e.s))].sort((x, y) => x - y);
+  const ouverte = state.saison != null ? state.saison : (nx ? nx.s : saisons[saisons.length - 1]);
+
+  const blocsSaisons = saisons.map(s => {
+    const eps = epsOf(sh).filter(e => e.s === s);
+    const w = eps.filter(vu).length;
+    const tous = w === eps.length;
+    return '<details class="season" ' + (s === ouverte ? "open" : "") + '>' +
+      '<summary><h3>' + (s === 0 ? "Spéciaux" : "Saison " + s) + '</h3>' +
+      '<span class="mono" style="font-size:11px;color:var(--gris)">' + w + '/' + eps.length + '</span>' +
+      '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
+      (tous ? "Tout décocher" : "Tout cocher") + '</span></summary>' +
+      eps.map(e => {
+        const w2 = vu(e);
+        return '<div class="ep ' + (w2 ? "done" : "") + '">' +
+          '<span class="code ' + (w2 ? "vu" : "") + '" style="flex:0 0 auto">S' + p2(e.s) + 'E' + p2(e.n || 0) + '</span>' +
+          '<div class="info" style="min-width:0"><div class="t">' + esc(e.t || "Épisode") + '</div>' +
+          '<div class="mono" style="font-size:10.5px;color:var(--gris)">' + (e.d ? frDate(e.d) : "date inconnue") +
+          (e.r ? " · " + e.r + " min" : "") + '</div></div>' +
+          (!w2 && diffuse(e) ? '<button class="upto" data-act="upto" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Marquer vu jusqu\'ici" aria-label="Marquer vu jusqu\'ici">' + svg("down", 15) + '</button>' : "") +
+          '<button class="epchk ' + (w2 ? "on" : "") + '" data-act="tick" data-id="' + sh.id + '" data-ep="' + e.i + '" aria-label="Marquer vu">' + svg("check", 17) + '</button>' +
+          '</div>';
+      }).join("") + '</details>';
+  }).join("");
+
+  return '<div class="sheet">' +
+    '<div class="sheetnav"><button class="iconbtn" data-act="close-sheet" aria-label="Retour">' + svg("back", 19) + '</button>' +
+      '<div style="flex:1;font-family:Archivo;font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(sh.name) + '</div>' +
+      '<button class="btn sm" data-act="refresh-one" data-id="' + sh.id + '">Actualiser</button></div>' +
+    '<div class="hero"><div class="row">' + affiche(sh, "lg") +
+      '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(sh.name) + '</h2>' +
+      '<div class="sub" style="-webkit-line-clamp:3;margin-top:6px">' +
+        [sh.premiered ? sh.premiered.slice(0, 4) + (sh.ended ? "–" + sh.ended.slice(0, 4) : sh.status === "Running" ? "–" : "") : "",
+         sh.network, sh.runtime ? sh.runtime + " min" : "", (sh.genres || []).slice(0, 3).join(", ")]
+        .filter(Boolean).map(esc).join(" · ") + '</div>' +
+      bande(sh) +
+      '<div class="stripmeta"><span>' + a.watched + '/' + a.total + ' épisodes</span><span>' + a.pct + ' % vus</span></div>' +
+      '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage</div>' +
+      '</div></div>' +
+      (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
+        svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>'
+        : up ? '<div class="box" style="margin-top:14px;text-align:center;font-size:13px">Prochain épisode <span class="code next">S' + p2(up.s) + 'E' + p2(up.n || 0) + '</span> ' + relDate(up.d) + '</div>'
+        : '<div class="box" style="margin-top:14px;text-align:center;font-size:13px;color:var(--gris)">Aucun épisode en attente</div>') +
+    '</div>' +
+    '<div class="wrap" style="padding-bottom:60px">' +
+      '<div class="eyebrow">Statut</div>' +
+      '<div class="seg">' + STATUTS.map(([id, l]) =>
+        '<button class="' + (sh.userStatus === id ? "on" : "") + '" data-act="statut" data-id="' + sh.id + '" data-v="' + id + '">' + l + '</button>').join("") + '</div>' +
+      (sh.summary ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(sh.summary) + '</p>' : "") +
+      '<div class="eyebrow">Épisodes <b>' + a.total + '</b></div>' +
+      '<div class="stack">' + blocsSaisons + '</div>' +
+      '<div class="eyebrow">Gestion</div>' +
+      '<div class="grid2">' +
+        (sh.url ? '<a class="btn" href="' + esc(sh.url) + '" target="_blank" rel="noopener">Fiche TVmaze</a>' : '<span></span>') +
+        '<button class="btn dgr" data-act="remove" data-id="' + sh.id + '">Retirer la série</button>' +
+      '</div>' +
+    '</div></div>';
+}
+
+/* ---------- vue : Réglages ---------- */
+function vueReglages(){
+  const n = Object.keys(DB.shows).length, e = Object.keys(DB.watched).length;
+  return '<div class="eyebrow">Sauvegarde</div>' +
+  '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, épisodes vus, statuts. Garde-la, c\'est ton seul filet.</p>' +
+    '<div class="grid2" style="margin-top:11px">' +
+      '<button class="btn" data-act="export-json">Fichier JSON</button>' +
+      '<button class="btn" data-act="export-csv">Fichier CSV</button></div></div>' +
+
+  '<div class="box" style="margin-top:9px"><h3>Importer une sauvegarde Antenne</h3>' +
+    '<p class="note">Fusionne avec ta liste actuelle. Rien n\'est supprimé.</p>' +
+    '<label class="btn full" style="margin-top:11px">Choisir un fichier JSON' +
+      '<input type="file" accept=".json,application/json" id="f-json" class="hide"></label></div>' +
+
+  '<div class="eyebrow">Reprendre TV Time</div>' +
+  '<div class="box"><h3>Importer un CSV</h3>' +
+    '<p class="note">Depuis TV Time : Profil → Paramètres → demande d\'export de tes données (RGPD). Dépose ici le fichier des épisodes vus. ' +
+    'Les colonnes reconnues : nom de série, saison, épisode, et si présent l\'identifiant TVDB. Chaque série est retrouvée dans TVmaze puis les épisodes correspondants sont cochés.</p>' +
+    '<label class="btn full pri" style="margin-top:11px">Choisir un fichier CSV' +
+      '<input type="file" accept=".csv,text/csv,text/plain" id="f-csv" class="hide"></label>' +
+    '<div class="pgt hide" id="imp-bar"><i></i></div><div class="log hide" id="imp-log"></div></div>' +
+
+  '<div class="box" style="margin-top:9px"><h3>Importer une liste de titres</h3>' +
+    '<p class="note">Un titre par ligne. Les séries sont ajoutées en « À voir », sans épisode coché.</p>' +
+    '<textarea id="ta-list" rows="4" placeholder="Severance&#10;The Bear&#10;Andor"></textarea>' +
+    '<button class="btn full" style="margin-top:9px" data-act="import-list">Ajouter ces séries</button></div>' +
+
+  '<div class="eyebrow">Affichage</div>' +
+  '<div class="box">' +
+    '<div class="sw"><div class="info"><div>Épisodes spéciaux</div><div class="note">Hors-séries, récaps et OAV comptés dans l\'avancement.</div></div>' +
+      '<button class="tg ' + (DB.settings.specials ? "on" : "") + '" data-act="tg" data-k="specials" role="switch" aria-checked="' + !!DB.settings.specials + '"></button></div>' +
+  '</div>' +
+
+  '<div class="eyebrow">Données</div>' +
+  '<div class="box"><div class="grid2" style="gap:9px">' +
+      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + '</div><div class="l">séries</div></div>' +
+      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">épisodes vus</div></div>' +
+    '</div>' +
+    '<p class="note" style="margin-top:11px">Stockage occupé : ' + (poids() / 1024).toFixed(0) + ' Ko sur ~5 Mo disponibles. Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
+    '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button>' +
+    '<button class="btn full dgr" style="margin-top:9px" data-act="wipe">Effacer toutes les données</button></div>' +
+
+  '<p class="note" style="text-align:center;margin:22px 0 6px">Antenne · données séries fournies par TVmaze</p>';
+}
+
+/* ============================================================
+   ACTIONS
+   ============================================================ */
+document.addEventListener("click", async ev => {
+  const el = ev.target.closest("[data-act]");
+  if(!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+
+  if(act === "tab"){ state.cherche = false; state.tab = id; render(); window.scrollTo(0, 0); return; }
+  if(act === "go-search"){ state.cherche = true; render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return; }
+  if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; render(); return; }
+  if(act === "filtre"){ state.filtre = id; render(); return; }
+  if(act === "tri"){ state.tri = id; render(); return; }
+
+  if(act === "open"){ ouvrirFiche(+id); return; }
+  if(act === "close-sheet"){ history.back(); return; }
+
+  if(act === "tick" || act === "upto"){
+    ev.preventDefault();
+    const sh = DB.shows[+id]; if(!sh) return;
+    const ep = (sh.eps || []).find(x => x.i === +el.dataset.ep); if(!ep) return;
+    if(act === "upto"){ marquerJusqua(sh, ep); toast("Épisodes précédents marqués vus"); }
+    else marquer(ep, !vu(ep));
+    if(state.detail) state.saison = ep.s;
+    autoStatut(sh); sauver();
+    const y = window.scrollY; render(); window.scrollTo(0, y);
+    return;
+  }
+  if(act === "season"){
+    ev.preventDefault();
+    const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
+    epsOf(sh).filter(e => e.s === s).forEach(e => { if(on) DB.watched[e.i] = new Date().toISOString(); else delete DB.watched[e.i]; });
+    autoStatut(sh); sauver(); state.saison = s; render();
+    return;
+  }
+  if(act === "statut"){
+    const sh = DB.shows[+id]; sh.userStatus = el.dataset.v; sauver(); render();
+    toast("Statut : " + (STATUTS.find(x => x[0] === el.dataset.v) || [])[1]);
+    return;
+  }
+  if(act === "remove"){
+    if(!confirm("Retirer « " + DB.shows[+id].name + " » et ses épisodes cochés ?")) return;
+    retirerShow(+id); state.detail = null; render(); history.back(); toast("Série retirée"); return;
+  }
+  if(act === "refresh-one"){
+    el.textContent = "…";
+    const sh = await fetchShow(+id);
+    if(sh){ ajouterShow(sh, DB.shows[+id].userStatus); toast("Fiche à jour"); }
+    render(); return;
+  }
+  if(act === "add"){
+    el.innerHTML = "…";
+    if(DB.shows[+id]){ retirerShow(+id); toast("Retirée de ta liste"); render(); return; }
+    const sh = await fetchShow(+id);
+    if(sh){ ajouterShow(sh, "watching"); toast("« " + sh.name + " » ajoutée"); }
+    render(); return;
+  }
+  if(act === "preview"){ 
+    const ex = DB.shows[+id];
+    if(ex){ ouvrirFiche(+id); return; }
+    el.style.opacity = ".5";
+    const sh = await fetchShow(+id);
+    el.style.opacity = "";
+    if(sh){ ajouterShow(sh, "planned"); render(); ouvrirFiche(+id); }
+    return;
+  }
+  if(act === "tg"){
+    DB.settings[el.dataset.k] = !DB.settings[el.dataset.k]; sauver(); render(); return;
+  }
+  if(act === "export-json") return exportJSON();
+  if(act === "export-csv")  return exportCSV();
+  if(act === "import-list") return importerListe();
+  if(act === "refresh-all") return actualiserTout();
+  if(act === "wipe"){
+    if(!confirm("Effacer définitivement toutes tes séries et tes épisodes vus ?")) return;
+    if(!confirm("Dernière confirmation : as-tu exporté une sauvegarde ?")) return;
+    localStorage.removeItem(LS); DB = charger(); render(); toast("Données effacées"); return;
+  }
+});
+
+function ouvrirFiche(id){
+  state.detail = id; state.saison = null;
+  history.pushState({ fiche:id }, "", "#s" + id);
+  render(); window.scrollTo(0, 0);
+}
+window.addEventListener("popstate", () => {
+  if(state.detail){ state.detail = null; render(); }
+});
+
+/* ---------- recherche live ---------- */
+let _q;
+document.addEventListener("input", ev => {
+  if(ev.target.id !== "q") return;
+  state.q = ev.target.value;
+  clearTimeout(_q);
+  _q = setTimeout(async () => {
+    const q = state.q.trim();
+    if(q.length < 2){ state.res = []; return majResultats(); }
+    try{
+      const r = await net.get(API + "/search/shows?q=" + encodeURIComponent(q));
+      state.res = (r || []).map(x => normShow(x.show)).slice(0, 20);
+    }catch(e){ toast("Recherche indisponible — vérifie ta connexion"); state.res = []; }
+    majResultats();
+  }, 340);
+});
+function majResultats(){
+  if(!state.cherche) return;
+  const q = $("#q"); const pos = q ? q.selectionStart : 0;
+  render();
+  const q2 = $("#q");
+  if(q2){ q2.focus(); try{ q2.setSelectionRange(pos, pos); }catch(e){} }
+}
+
+/* ============================================================
+   IMPORT / EXPORT
+   ============================================================ */
+function telecharger(nom, contenu, type){
+  const b = new Blob([contenu], { type: type || "application/json" });
+  const u = URL.createObjectURL(b);
+  const a = document.createElement("a");
+  a.href = u; a.download = nom; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 800);
+}
+function exportJSON(){
+  telecharger("antenne-" + todayISO() + ".json", JSON.stringify({ ...DB, exportedAt:new Date().toISOString(), app:"antenne" }, null, 1));
+  toast("Sauvegarde exportée");
+}
+function exportCSV(){
+  const l = ['show_name,tvmaze_id,season,episode,episode_name,airdate,watched_at'];
+  Object.values(DB.shows).forEach(sh => (sh.eps || []).forEach(e => {
+    if(!DB.watched[e.i]) return;
+    l.push([sh.name, sh.id, e.s, e.n || "", e.t, e.d || "", DB.watched[e.i]]
+      .map(v => '"' + String(v == null ? "" : v).replace(/"/g, '""') + '"').join(","));
+  }));
+  telecharger("antenne-episodes-" + todayISO() + ".csv", l.join("\n"), "text/csv;charset=utf-8");
+  toast(l.length - 1 + " épisodes exportés");
+}
+
+/* ---------- CSV : lecture ---------- */
+function parseCSV(txt){
+  txt = txt.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const tete = txt.slice(0, txt.indexOf("\n") > 0 ? txt.indexOf("\n") : 400);
+  const sep = [",", ";", "\t"].sort((a, b) => (tete.split(b).length - tete.split(a).length))[0];
+  const rows = []; let f = "", row = [], quote = false;
+  for(let i = 0; i < txt.length; i++){
+    const c = txt[i];
+    if(quote){
+      if(c === '"'){ if(txt[i+1] === '"'){ f += '"'; i++; } else quote = false; }
+      else f += c;
+    }else{
+      if(c === '"') quote = true;
+      else if(c === sep){ row.push(f); f = ""; }
+      else if(c === "\n"){ row.push(f); rows.push(row); row = []; f = ""; }
+      else f += c;
+    }
+  }
+  if(f.length || row.length){ row.push(f); rows.push(row); }
+  return rows.filter(r => r.some(x => String(x).trim() !== ""));
+}
+function colonne(tete, exacts, partiels){
+  let i = tete.findIndex(h => exacts.includes(h));
+  if(i < 0 && partiels) i = tete.findIndex(h => partiels.some(p => h.includes(p)));
+  return i;
+}
+
+async function importerCSV(txt){
+  const bar = $("#imp-bar"), log = $("#imp-log");
+  bar.classList.remove("hide"); log.classList.remove("hide"); log.textContent = "";
+  const dire = m => { log.textContent += m + "\n"; log.scrollTop = log.scrollHeight; };
+  const avance = p => { bar.firstElementChild.style.width = p + "%"; };
+
+  const rows = parseCSV(txt);
+  if(rows.length < 2){ dire("Fichier vide ou illisible."); return; }
+  const tete = rows[0].map(h => h.toLowerCase().trim().replace(/^"|"$/g, ""));
+  const cN = colonne(tete, ["show_name","series_name","serie","série","show","series","title","name","tv_show","show name"], ["show","serie","title"]);
+  const cS = colonne(tete, ["season_number","season","saison","season_no","s"], ["season","saison"]);
+  const cE = colonne(tete, ["episode_number","episode","épisode","number","episode_no","e"], ["episode","épisode","number"]);
+  const cT = colonne(tete, ["tvdb_id","thetvdb_id","tvdb","series_id","show_id"], ["tvdb"]);
+  const cD = colonne(tete, ["watched_at","created_at","date_watched","last_watched","updated_at","date","timestamp"], ["watched","date"]);
+
+  dire("Colonnes détectées : " + [cN >= 0 ? "série=" + tete[cN] : null, cS >= 0 ? "saison=" + tete[cS] : null,
+       cE >= 0 ? "épisode=" + tete[cE] : null, cT >= 0 ? "tvdb=" + tete[cT] : null].filter(Boolean).join("  ") || "aucune");
+  if(cN < 0 && cT < 0){ dire("Impossible de repérer la série. Il faut une colonne de titre ou d'identifiant TVDB."); return; }
+  if(cS < 0 || cE < 0) dire("Pas de colonne saison/épisode : les séries seront ajoutées sans cocher d'épisode.");
+
+  const groupes = new Map();
+  rows.slice(1).forEach(r => {
+    const nom = cN >= 0 ? String(r[cN] || "").trim() : "";
+    const tv  = cT >= 0 ? String(r[cT] || "").trim() : "";
+    const cle = nom || (tv ? "tvdb:" + tv : "");
+    if(!cle) return;
+    if(!groupes.has(cle)) groupes.set(cle, { nom, tvdb:/^\d+$/.test(tv) ? tv : null, eps:[] });
+    if(cS >= 0 && cE >= 0){
+      const s = parseInt(r[cS], 10), n = parseInt(r[cE], 10);
+      if(!isNaN(s) && !isNaN(n)) groupes.get(cle).eps.push({ s, n, d: cD >= 0 ? r[cD] : null });
+    }
+  });
+
+  dire(groupes.size + " séries repérées, " + (rows.length - 1) + " lignes.");
+  let ok = 0, coches = 0; const rates = [];
+  let i = 0;
+  for(const [cle, g] of groupes){
+    i++; avance(Math.round(i / groupes.size * 100));
+    const etiquette = g.nom || cle;
+    try{
+      let sh = null;
+      const deja = Object.values(DB.shows).find(x => x.name.toLowerCase() === etiquette.toLowerCase() || (g.tvdb && String(x.tvdb) === g.tvdb));
+      if(deja) sh = deja;
+      else if(g.tvdb){
+        const lk = await net.get(API + "/lookup/shows?thetvdb=" + g.tvdb);
+        if(lk) sh = await fetchShow(lk.id);
+      }
+      if(!sh && g.nom){
+        const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(g.nom) + "&embed=episodes");
+        if(r){ sh = normShow(r); sh.eps = normEps(r._embedded && r._embedded.episodes); }
+      }
+      if(!sh){ rates.push(etiquette); dire("✗ " + etiquette); continue; }
+      if(!DB.shows[sh.id]) ajouterShow(sh, "watching");
+      const cible = DB.shows[sh.id];
+      let c = 0;
+      g.eps.forEach(x => {
+        const ep = (cible.eps || []).find(e => e.s === x.s && e.n === x.n);
+        if(ep && !DB.watched[ep.i]){
+          const d = x.d && !isNaN(new Date(x.d)) ? new Date(x.d).toISOString() : new Date().toISOString();
+          DB.watched[ep.i] = d; c++;
+        }
+      });
+      autoStatut(cible);
+      coches += c; ok++;
+      dire("✓ " + cible.name + (c ? "  +" + c + " épisodes" : ""));
+      sauver();
+    }catch(e){ rates.push(etiquette); dire("✗ " + etiquette + " (" + e.message + ")"); }
+  }
+  avance(100);
+  dire("\nTerminé : " + ok + " séries, " + coches + " épisodes cochés." + (rates.length ? " " + rates.length + " non trouvées." : ""));
+  sauver(); toast(ok + " séries importées");
+}
+
+async function importerListe(){
+  const ta = $("#ta-list"); if(!ta) return;
+  const noms = ta.value.split("\n").map(s => s.trim()).filter(Boolean);
+  if(!noms.length) return toast("Aucun titre saisi");
+  const bar = $("#imp-bar"), log = $("#imp-log");
+  bar.classList.remove("hide"); log.classList.remove("hide"); log.textContent = "";
+  let ok = 0;
+  for(let i = 0; i < noms.length; i++){
+    bar.firstElementChild.style.width = Math.round((i + 1) / noms.length * 100) + "%";
+    try{
+      const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(noms[i]) + "&embed=episodes");
+      if(r){ const sh = normShow(r); sh.eps = normEps(r._embedded && r._embedded.episodes);
+        if(!DB.shows[sh.id]) ajouterShow(sh, "planned");
+        ok++; log.textContent += "✓ " + sh.name + "\n"; }
+      else log.textContent += "✗ " + noms[i] + "\n";
+    }catch(e){ log.textContent += "✗ " + noms[i] + "\n"; }
+    log.scrollTop = log.scrollHeight;
+  }
+  sauver(); toast(ok + " séries ajoutées");
+}
+
+async function actualiserTout(){
+  const l = Object.values(DB.shows);
+  if(!l.length) return toast("Aucune série à actualiser");
+  const bar = $("#imp-bar"), log = $("#imp-log");
+  bar.classList.remove("hide"); log.classList.remove("hide"); log.textContent = "";
+  for(let i = 0; i < l.length; i++){
+    bar.firstElementChild.style.width = Math.round((i + 1) / l.length * 100) + "%";
+    try{
+      const sh = await fetchShow(l[i].id);
+      if(sh) ajouterShow(sh, l[i].userStatus);
+      log.textContent += "✓ " + l[i].name + "\n";
+    }catch(e){ log.textContent += "✗ " + l[i].name + "\n"; }
+    log.scrollTop = log.scrollHeight;
+  }
+  sauver(); toast("Séries actualisées");
+}
+
+/* ---------- fichiers ---------- */
+document.addEventListener("change", ev => {
+  const f = ev.target.files && ev.target.files[0];
+  if(!f) return;
+  const rd = new FileReader();
+  if(ev.target.id === "f-json"){
+    rd.onload = () => {
+      try{
+        const d = JSON.parse(rd.result);
+        if(!d.shows) throw new Error("format inattendu");
+        let ns = 0, ne = 0;
+        Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = v; ns++; } });
+        Object.entries(d.watched || {}).forEach(([k, v]) => { if(!DB.watched[k]){ DB.watched[k] = v; ne++; } });
+        sauver(); render();
+        toast(ns + " séries et " + ne + " épisodes ajoutés");
+      }catch(e){ toast("Fichier illisible : " + e.message); }
+    };
+    rd.readAsText(f);
+  }
+  if(ev.target.id === "f-csv"){
+    rd.onload = () => importerCSV(String(rd.result));
+    rd.readAsText(f);
+  }
+  ev.target.value = "";
+});
+
+/* ---------- rafraîchissement discret des séries en cours ---------- */
+async function majAuto(){
+  const seuil = Date.now() - 3 * 86400000;
+  const l = Object.values(DB.shows)
+    .filter(sh => sh.status === "Running" && sh.userStatus !== "dropped" && (sh.lastFetched || 0) < seuil)
+    .slice(0, 6);
+  for(const s of l){
+    try{ const sh = await fetchShow(s.id); if(sh) ajouterShow(sh, s.userStatus); }catch(e){}
+  }
+  if(l.length){ sauver(); if(!state.detail && !state.cherche) render(); }
+}
+
+/* ---------- démarrage ---------- */
+render();
+setTimeout(majAuto, 2500);
+window.addEventListener("beforeunload", () => { try{ localStorage.setItem(LS, JSON.stringify(DB)); }catch(e){} });
+</script>
+</body>
+</html>
