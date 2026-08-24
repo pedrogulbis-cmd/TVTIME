@@ -305,9 +305,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.7.0";
+const VERSION = "1.8.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.8.0", d:"2026-08-24", t:"Tri par reprise", l:[
+    "Ma liste s'ouvre désormais sur la série reprise le plus récemment.",
+    "Cocher un épisode, cocher une saison ou lancer un revisionnage remonte la série en tête.",
+    "Une série qu'on vient d'ajouter passe en première position.",
+    "Les séries déjà présentes retrouvent leur rang à partir de leur date de visionnage la plus récente.",
+    "L'ancien tri par date de diffusion reste disponible sous le nom « Diffusion »."
+  ]},
   { v:"1.7.0", d:"2026-08-24", t:"Import BetaSeries", l:[
     "Nouvelle section : l'export BetaSeries se reprend depuis son .zip ou depuis les deux CSV sélectionnés ensemble.",
     "Les épisodes vus arrivent avec leurs dates réelles, et les séries archivées sur BetaSeries le restent dans Antenne.",
@@ -628,6 +635,7 @@ function ajouterShow(sh, statut){
     ...sh,
     userStatus: statut || old.userStatus || "watching",
     pass: old.pass || 1,
+    activite: old.activite || Date.now(),
     archive: old.archive || false,
     favorite: old.favorite || false,
     addedAt: old.addedAt || Date.now(),
@@ -686,6 +694,26 @@ function tours(sh){
   return Math.min.apply(null, air.map(nbVues));
 }
 function episodesRevus(sh){ return epsOf(sh).filter(e => nbVues(e) > 1).length; }
+
+/* Dernière fois où la série a bougé : un épisode coché, un ajout, un passage.
+   Pour les séries antérieures à cette notion, on la reconstitue une fois à
+   partir de la date de visionnage la plus récente, puis on la mémorise. */
+function dernierVu(sh){
+  let max = 0;
+  (sh.eps || []).forEach(e => {
+    const v = vues(e);
+    if(!v.length) return;
+    const t = Date.parse(v[v.length - 1]);
+    if(t && t > max) max = t;
+  });
+  return max;
+}
+function activiteDe(sh){
+  if(sh.activite) return sh.activite;
+  sh.activite = dernierVu(sh) || sh.addedAt || 0;
+  return sh.activite;
+}
+function toucher(sh){ if(sh) sh.activite = Date.now(); }
 function revuTexte(sh){
   const t = tours(sh), r = episodesRevus(sh);
   if(t >= 2) return { court:"↺" + t, long:"Vue " + t + " fois en entier" +
@@ -737,7 +765,7 @@ const ICO = {
 const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICO[k] + '</svg>';
 
 /* ---------- état de navigation ---------- */
-const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
+const state = { tab:"upnext", detail:null, filtre:"all", tri:"activite", q:"", res:[], cherche:false,
                 saisons:null, animer:false, retour:0, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60, limiteS:60,
                 quota:null, durable:false };
@@ -950,7 +978,8 @@ function vueListe(){
   const t = state.tri;
   const dNext = sh => { const e = prochainAVoir(sh); return e ? String(e.d) : "0"; };
   l = l.slice().sort((a, b) =>
-      t === "az"       ? a.name.localeCompare(b.name)
+      t === "activite" ? activiteDe(b) - activiteDe(a) || a.name.localeCompare(b.name)
+    : t === "az"       ? a.name.localeCompare(b.name)
     : t === "progress" ? avancement(b).pct - avancement(a).pct || a.name.localeCompare(b.name)
     : t === "added"    ? (b.addedAt || 0) - (a.addedAt || 0)
     : t === "reste"    ? (tempsRestant(a) || 9e9) - (tempsRestant(b) || 9e9) || a.name.localeCompare(b.name)
@@ -998,7 +1027,7 @@ function vueListe(){
     '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
 
   const tris = '<div class="chips" style="margin-top:6px">' +
-    [["recent","Diffusion"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
+    [["activite","Reprise"],["recent","Diffusion"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
       .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
 
   /* --- corps --- */
@@ -1386,6 +1415,7 @@ document.addEventListener("click", async ev => {
     if(act === "upto"){ marquerJusqua(sh, ep); toast("Épisodes précédents marqués vus"); }
     else if(act === "again"){ revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté"); }
     else marquer(ep, sh, !vu(ep, sh));
+    toucher(sh);
 
     autoStatut(sh); sauverShow(sh);
     render();
@@ -1395,6 +1425,7 @@ document.addEventListener("click", async ev => {
     ev.preventDefault();
     const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
     epsOf(sh).filter(e => e.s === s).forEach(e => marquer(e, sh, on));
+    toucher(sh);
     autoStatut(sh); sauverShow(sh);
     if(!state.saisons) state.saisons = new Set();
     state.saisons.add(s); render();
@@ -1412,7 +1443,7 @@ document.addEventListener("click", async ev => {
   if(act === "rewatch"){
     const sh = DB.shows[+id];
     if(!avancement(sh).watched) return toast("Coche d'abord quelques épisodes");
-    nouveauPassage(sh); saisonCourante(sh); render();
+    nouveauPassage(sh); toucher(sh); sauverShow(sh); saisonCourante(sh); render();
     toast("Passage " + passe(sh) + " — c'est reparti du début");
     return;
   }
@@ -1476,7 +1507,7 @@ document.addEventListener("click", async ev => {
     localStorage.removeItem(LS);
     DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION; DB.settings.theme = themeActuel();
     sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
-    state.filtre = "all"; state.tri = "recent"; state.ql = state.genre = state.plateforme = state.diffusion = "";
+    state.filtre = "all"; state.tri = "activite"; state.ql = state.genre = state.plateforme = state.diffusion = "";
     state.limite = PAGE; state.detail = null;
     render(); majQuota(); toast("Données purgées"); return;
   }
@@ -1781,6 +1812,7 @@ async function importerTVTime(rows, tete){
         if(cur.length > avant){ c2++; r2 += Math.max(0, dates.length - 1); poser(e, cur); }
       });
 
+      cible.activite = dernierVu(cible) || cible.addedAt || Date.now();
       cible.archive = !!s.archive;
       if(s.archive) arch++;
       if(s.plusTard) cible.userStatus = "planned";
@@ -1939,6 +1971,7 @@ async function importerBetaSeries(rSeries, rEpisodes){
         }
       }
 
+      cible.activite = dernierVu(cible) || cible.addedAt || Date.now();
       cible.archive = !!s.archive;
       if(s.archive) arch++;
       if(!c2 && !avancement(cible).watched) cible.userStatus = "planned";
@@ -2021,6 +2054,7 @@ async function importerGenerique(rows, tete){
       });
       const air = epsOf(cible).filter(diffuse);
       if(air.length) cible.pass = Math.max(1, Math.min.apply(null, air.map(nbVues)));
+      cible.activite = dernierVu(cible) || cible.addedAt || Date.now();
       autoStatut(cible); sauverShow(cible);
       coches += c2; ok++;
       impr.dire("✓ " + cible.name + (c2 ? "  " + c2 + " épisodes" : "") + (rw ? "  +" + rw + " revisionnages" : ""));
