@@ -305,9 +305,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.4.0";
+const VERSION = "1.5.0";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.5.0", d:"2026-08-24", t:"Import TV Time complet", l:[
+    "L'archive .zip de TV Time se dépose telle quelle : elle est lue et décompressée dans le navigateur.",
+    "Le format tracking-prod-records-v2 est reconnu nativement : correspondance par identifiant TVDB, sans ambiguïté de titre.",
+    "Les revisionnages sont repris un par un, avec leurs dates réelles, et le passage courant en découle.",
+    "Les séries archivées et « pour plus tard » de TV Time retrouvent leur état dans Antenne.",
+    "Progression détaillée pendant l'import, avec temps restant estimé et bouton d'interruption.",
+    "Bouton de purge complète en bas des Réglages, avec double confirmation."
+  ]},
   { v:"1.4.0", d:"2026-08-24", t:"Thème clair et archives", l:[
     "Thème clair, thème sombre, ou suivi du réglage du système. Le choix est mémorisé et appliqué dès l'ouverture.",
     "Deux boutons à droite de chaque série dans Ma liste : archiver et retirer.",
@@ -701,7 +709,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                saisons:null, animer:false, retour:0, journal:false, neuf:false,
+                saisons:null, animer:false, retour:0, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
 const PAGE = 60;
@@ -1185,13 +1193,19 @@ function vueReglages(){
       '<input type="file" accept=".json,application/json" id="f-json" class="hide"></label></div>' +
 
   '<div class="eyebrow">Reprendre TV Time</div>' +
-  '<div class="box"><h3>Importer un CSV</h3>' +
-    '<p class="note">Depuis TV Time : Profil → Paramètres → demande d\'export de tes données (RGPD). Dépose ici le fichier des épisodes vus. ' +
-    'Les colonnes reconnues : nom de série, saison, épisode, et si présent l\'identifiant TVDB. Chaque série est retrouvée dans TVmaze puis les épisodes correspondants sont cochés. ' +
-    'Un même épisode présent sur plusieurs lignes compte pour autant de visionnages.</p>' +
-    '<label class="btn full pri" style="margin-top:11px">Choisir un fichier CSV' +
-      '<input type="file" accept=".csv,text/csv,text/plain" id="f-csv" class="hide"></label>' +
-    '<div class="pgt hide" id="imp-bar"><i></i></div><div class="log hide" id="imp-log"></div></div>' +
+  '<div class="box"><h3>Importer l\'archive TV Time</h3>' +
+    '<p class="note">Dépose ici le <b>.zip</b> reçu de TV Time (Profil → Paramètres → export de tes données). ' +
+    'L\'archive est lue directement, sans extraction. Antenne se sert du fichier <span class="mono">tracking-prod-records-v2.csv</span> : ' +
+    'chaque série est retrouvée par son identifiant TVDB, donc sans se tromper d\'homonyme, et les revisionnages comme les séries archivées sont repris tels quels.</p>' +
+    '<p class="note" style="margin-top:7px">Compte environ une seconde par série — le catalogue TVmaze limite le rythme des requêtes. ' +
+    'Un CSV seul fonctionne aussi, y compris venant d\'un autre outil.</p>' +
+    '<label class="btn full pri" style="margin-top:11px">Choisir un fichier ZIP ou CSV' +
+      '<input type="file" accept=".zip,.csv,application/zip,text/csv,text/plain" id="f-csv" class="hide"></label>' +
+    '<div class="pgt hide" id="imp-bar"><i></i></div>' +
+    '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
+      '<div class="mono" id="imp-etat" style="font-size:11px;color:var(--gris);flex:1"></div>' +
+      '<button class="btn sm dgr hide" id="imp-stop" data-act="stop-import">Interrompre</button></div>' +
+    '<div class="log hide" id="imp-log"></div></div>' +
 
   '<div class="box" style="margin-top:9px"><h3>Importer une liste de titres</h3>' +
     '<p class="note">Un titre par ligne. Les séries sont ajoutées en « À voir », sans épisode coché.</p>' +
@@ -1223,8 +1237,7 @@ function vueReglages(){
         '<div class="note">Sans lui, un navigateur peut effacer les données d\'un site resté longtemps sans visite. ' +
         'Le mettre en place ne coûte rien et ne change rien d\'autre.</div></div>' +
       (state.durable ? '' : '<button class="btn sm" data-act="durable">Activer</button>') + '</div>' +
-    '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button>' +
-    '<button class="btn full dgr" style="margin-top:9px" data-act="wipe">Effacer toutes les données</button></div>' +
+    '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button></div>' +
 
   '<div class="eyebrow" id="anc-journal">Version</div>' +
   '<div class="box"><div style="display:flex;align-items:baseline;gap:10px">' +
@@ -1242,6 +1255,15 @@ function vueReglages(){
         '<span class="cl-t">' + esc(e.t) + '</span></div>' +
         '<ul>' + e.l.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul></div>').join("") +
       '</div></details></div>' +
+
+  '<div class="eyebrow">Repartir de zéro</div>' +
+  '<div class="box" style="border-color:var(--rougeB)">' +
+    '<h3 style="color:var(--rouge)">Purger toutes les données</h3>' +
+    '<p class="note">Efface les ' + n + ' séries, les ' + e + ' visionnages et les réglages, puis remet Antenne dans son état d\'origine. ' +
+    'Le thème et le journal des versions sont conservés. Utile pour rejouer un import depuis zéro.</p>' +
+    '<p class="note" style="margin-top:7px;color:var(--rouge)">Rien n\'est récupérable ensuite. Exporte d\'abord si tu tiens à quelque chose.</p>' +
+    '<button class="btn full dgr" style="margin-top:11px" data-act="wipe">' + svg("poubelle", 16) + ' Purger toutes les données</button>' +
+  '</div>' +
 
   '<p class="note" style="text-align:center;margin:22px 0 6px">Antenne v' + VERSION + ' · données séries fournies par TVmaze</p>';
 }
@@ -1369,6 +1391,7 @@ document.addEventListener("click", async ev => {
   if(act === "export-csv")  return exportCSV();
   if(act === "import-list") return importerListe();
   if(act === "refresh-all") return actualiserTout();
+  if(act === "stop-import"){ state.annuler = true; toast("Interruption en cours…"); return; }
   if(act === "durable"){
     if(!navigator.storage || !navigator.storage.persist) return toast("Non géré par ce navigateur");
     try{
@@ -1379,13 +1402,17 @@ document.addEventListener("click", async ev => {
     majQuota(); return;
   }
   if(act === "wipe"){
-    if(!confirm("Effacer définitivement toutes tes séries et tes épisodes vus ?")) return;
-    if(!confirm("Dernière confirmation : as-tu exporté une sauvegarde ?")) return;
+    const nbS = Object.keys(DB.shows).length;
+    const nbV = Object.values(DB.watched).reduce((t, v) => t + (Array.isArray(v) ? v.length : 1), 0);
+    if(!confirm("Purger toutes les données ?\n\n" + nbS + " séries et " + nbV + " visionnages seront effacés définitivement.")) return;
+    if(!confirm("Dernière confirmation.\n\nAs-tu exporté une sauvegarde ? Cette action est irréversible.")) return;
     try{ await IDB.vider(); }catch(e){}
     localStorage.removeItem(LS);
     DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION; DB.settings.theme = themeActuel();
     sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
-    render(); majQuota(); toast("Données effacées"); return;
+    state.filtre = "all"; state.tri = "recent"; state.ql = state.genre = state.plateforme = state.diffusion = "";
+    state.limite = PAGE; state.detail = null;
+    render(); majQuota(); toast("Données purgées"); return;
   }
 });
 
@@ -1514,25 +1541,217 @@ function colonne(tete, exacts, partiels){
   return i;
 }
 
-async function importerCSV(txt){
-  const bar = $("#imp-bar"), log = $("#imp-log");
-  bar.classList.remove("hide"); log.classList.remove("hide"); log.textContent = "";
-  const dire = m => { log.textContent += m + "\n"; log.scrollTop = log.scrollHeight; };
-  const avance = p => { bar.firstElementChild.style.width = p + "%"; };
+/* ---------- lecture d'une archive ZIP ----------
+   Les exports TV Time arrivent en .zip. Plutôt que de demander une extraction
+   manuelle, on lit l'archive directement : en-têtes ZIP à la main, puis
+   décompression par DecompressionStream, présent dans tous les navigateurs
+   récents.                                                                */
+async function lireZip(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf);
+  let fin = -1;
+  for(let i = u8.length - 22; i >= Math.max(0, u8.length - 66000); i--){
+    if(dv.getUint32(i, true) === 0x06054b50){ fin = i; break; }
+  }
+  if(fin < 0) throw new Error("ce fichier n'est pas une archive ZIP lisible");
+  const nb = dv.getUint16(fin + 10, true);
+  let off = dv.getUint32(fin + 16, true);
+  const dec = new TextDecoder();
+  const entrees = new Map();
+  for(let k = 0; k < nb; k++){
+    if(dv.getUint32(off, true) !== 0x02014b50) break;
+    const methode = dv.getUint16(off + 10, true);
+    const tailleC = dv.getUint32(off + 20, true);
+    const nLen = dv.getUint16(off + 28, true);
+    const eLen = dv.getUint16(off + 30, true);
+    const cLen = dv.getUint16(off + 32, true);
+    const local = dv.getUint32(off + 42, true);
+    const nom = dec.decode(u8.subarray(off + 46, off + 46 + nLen));
+    off += 46 + nLen + eLen + cLen;
+    if(nom.endsWith("/")) continue;
+    const lnLen = dv.getUint16(local + 26, true), leLen = dv.getUint16(local + 28, true);
+    const debut = local + 30 + lnLen + leLen;
+    entrees.set(nom.split("/").pop(), { methode, brut:u8.subarray(debut, debut + tailleC) });
+  }
+  return entrees;
+}
+async function extraire(e){
+  if(e.methode === 0) return new TextDecoder().decode(e.brut);
+  if(e.methode !== 8) throw new Error("compression non gérée");
+  if(!window.DecompressionStream) throw new Error("ce navigateur ne sait pas décompresser les ZIP");
+  const flux = new Blob([e.brut]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return await new Response(flux).text();
+}
 
+/* ---------- affichage de la progression ---------- */
+const impr = {
+  ouvert:false,
+  ouvrir(){
+    const bar = $("#imp-bar"), log = $("#imp-log"), stop = $("#imp-stop");
+    if(bar) bar.classList.remove("hide");
+    if(log){ log.classList.remove("hide"); if(!this.ouvert) log.textContent = ""; }
+    if(stop) stop.classList.remove("hide");
+    if(!this.ouvert){ state.annuler = false; this.ouvert = true; }
+  },
+  dire(m){ const l = $("#imp-log"); if(l){ l.textContent += m + "\n"; l.scrollTop = l.scrollHeight; } },
+  avance(fait, total, reste){
+    const b = $("#imp-bar");
+    if(b) b.firstElementChild.style.width = Math.round(fait / Math.max(1, total) * 100) + "%";
+    const t = $("#imp-etat");
+    if(t) t.textContent = fait + " / " + total + (reste != null ? " · encore " + dureeLongue(Math.ceil(reste / 60)) : "");
+  },
+  fermer(){ this.ouvert = false; const s2 = $("#imp-stop"); if(s2) s2.classList.add("hide");
+            const t = $("#imp-etat"); if(t) t.textContent = ""; }
+};
+
+/* ---------- aiguillage ---------- */
+const estTVTime = tete => tete.includes("key") && tete.includes("series_name") && tete.includes("s_id");
+
+async function importerFichier(f){
+  impr.ouvrir();
+  try{
+    if(/\.zip$/i.test(f.name)){
+      impr.dire("Ouverture de l'archive " + f.name + "…");
+      const zip = await lireZip(await f.arrayBuffer());
+      impr.dire(zip.size + " fichiers dans l'archive.");
+      const choix = ["tracking-prod-records-v2.csv", "tracking-prod-records.csv"]
+        .find(n => zip.has(n)) || [...zip.keys()].find(n => /\.csv$/i.test(n));
+      if(!choix) throw new Error("aucun CSV dans l'archive");
+      impr.dire("Lecture de " + choix + "…");
+      return importerCSV(await extraire(zip.get(choix)));
+    }
+    return importerCSV(await f.text());
+  }catch(e){
+    impr.dire("Échec : " + (e && e.message || e));
+    impr.fermer();
+  }
+}
+
+async function importerCSV(txt){
+  impr.ouvrir();
   const rows = parseCSV(txt);
-  if(rows.length < 2){ dire("Fichier vide ou illisible."); return; }
+  if(rows.length < 2){ impr.dire("Fichier vide ou illisible."); return impr.fermer(); }
   const tete = rows[0].map(h => h.toLowerCase().trim().replace(/^"|"$/g, ""));
+  impr.dire(rows.length - 1 + " lignes lues.");
+  return estTVTime(tete) ? importerTVTime(rows, tete) : importerGenerique(rows, tete);
+}
+
+/* ---------- format TV Time (tracking-prod-records-v2) ----------
+   Une ligne par visionnage, préfixée watch-episode ou rewatch-episode.
+   Les lignes user-series portent le suivi, l'archivage et « pour plus tard ».
+   s_id est l'identifiant TVDB : la correspondance est exacte, sans deviner
+   à partir du titre.                                                       */
+async function importerTVTime(rows, tete){
+  const c = k => tete.indexOf(k);
+  const iKey = c("key"), iNom = c("series_name"), iSid = c("s_id"),
+        iS = c("season_number"), iE = c("episode_number"), iD = c("created_at"),
+        iFol = c("is_followed"), iArc = c("is_archived"), iLat = c("is_for_later");
+
+  impr.dire("Format reconnu : export TV Time.");
+  const series = new Map();
+  const obtenir = (sid, nom) => {
+    if(!series.has(sid)) series.set(sid, { sid, nom, suivi:true, archive:false, plusTard:false, vues:new Map() });
+    const s = series.get(sid);
+    if(nom && !s.nom) s.nom = nom;
+    return s;
+  };
+
+  rows.slice(1).forEach(r => {
+    const key = String(r[iKey] || "");
+    const sid = String(r[iSid] || "").trim();
+    if(!sid || !/^\d+$/.test(sid)) return;
+    const s = obtenir(sid, String(r[iNom] || "").trim());
+    if(key.startsWith("user-series")){
+      s.suivi    = String(r[iFol]) === "true";
+      s.archive  = String(r[iArc]) === "true";
+      s.plusTard = String(r[iLat]) === "true";
+    }else if(key.startsWith("watch-episode") || key.startsWith("rewatch-episode")){
+      const se = parseInt(r[iS], 10), ep = parseInt(r[iE], 10);
+      if(isNaN(se) || isNaN(ep)) return;
+      const k2 = se + "-" + ep;
+      if(!s.vues.has(k2)) s.vues.set(k2, []);
+      s.vues.get(k2).push(r[iD] || null);
+    }
+  });
+
+  const total = series.size;
+  const nbVues2 = [...series.values()].reduce((t, s) => t + [...s.vues.values()].reduce((x, v) => x + v.length, 0), 0);
+  impr.dire(total + " séries et " + nbVues2 + " visionnages à reprendre.");
+  impr.dire("Compte environ " + dureeLongue(Math.ceil(total * 1.1 / 60)) + ". Laisse cet onglet ouvert.\n");
+
+  let ok = 0, coches = 0, revus = 0, arch = 0;
+  const rates = [];
+  let i = 0;
+  for(const s of series.values()){
+    if(state.annuler){ impr.dire("\nInterrompu. Les " + ok + " premières séries sont enregistrées."); break; }
+    i++;
+    impr.avance(i, total, (total - i) * 1.1);
+    try{
+      let sh = Object.values(DB.shows).find(x => String(x.tvdb) === s.sid);
+      if(!sh){
+        const lk = await net.get(API + "/lookup/shows?thetvdb=" + s.sid);
+        if(lk) sh = await fetchShow(lk.id);
+      }
+      if(!sh && s.nom){
+        const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(s.nom) + "&embed=episodes");
+        if(r){ sh = normShow(r); sh.eps = normEps(r._embedded && r._embedded.episodes); }
+      }
+      if(!sh){ rates.push(s.nom || s.sid); impr.dire("✗ " + (s.nom || "TVDB " + s.sid)); continue; }
+
+      if(!DB.shows[sh.id]) ajouterShow(sh, "watching");
+      const cible = DB.shows[sh.id];
+      let c2 = 0, r2 = 0;
+      s.vues.forEach((dates, k2) => {
+        const [se, ep] = k2.split("-").map(Number);
+        const e = (cible.eps || []).find(x => x.s === se && x.n === ep);
+        if(!e) return;
+        const avant = vues(e).length;
+        const cur = vues(e).slice();
+        while(cur.length < dates.length){
+          const d = dates[cur.length];
+          const t = d ? new Date(String(d).replace(" ", "T") + "Z") : null;
+          cur.push(t && !isNaN(t) ? t.toISOString() : new Date().toISOString());
+        }
+        if(cur.length > avant){ c2++; r2 += Math.max(0, dates.length - 1); poser(e, cur); }
+      });
+
+      cible.archive = !!s.archive;
+      if(s.archive) arch++;
+      if(s.plusTard) cible.userStatus = "planned";
+      else if(!s.suivi && !s.vues.size) cible.userStatus = "planned";
+      const air = epsOf(cible).filter(diffuse);
+      if(air.length) cible.pass = Math.max(1, Math.min.apply(null, air.map(nbVues)));
+      autoStatut(cible); sauverShow(cible);
+
+      coches += c2; revus += r2; ok++;
+      impr.dire("✓ " + cible.name + (c2 ? "  " + c2 + " épisodes" : "") +
+        (r2 ? "  +" + r2 + " revisionnages" : "") +
+        (cible.pass > 1 ? "  passage " + cible.pass : "") +
+        (s.archive ? "  [archivée]" : ""));
+    }catch(e){
+      rates.push(s.nom || s.sid);
+      impr.dire("✗ " + (s.nom || s.sid) + " (" + (e && e.message || e) + ")");
+    }
+  }
+  impr.avance(total, total);
+  impr.dire("\nTerminé : " + ok + " séries, " + coches + " épisodes, " + revus + " revisionnages, " + arch + " archivées." +
+    (rates.length ? "\nNon retrouvées (" + rates.length + ") : " + rates.slice(0, 20).join(", ") + (rates.length > 20 ? "…" : "") : ""));
+  impr.fermer();
+  toast(ok + " séries importées");
+  majQuota();
+}
+
+/* ---------- CSV d'origine quelconque ---------- */
+async function importerGenerique(rows, tete){
   const cN = colonne(tete, ["show_name","series_name","serie","série","show","series","title","name","tv_show","show name"], ["show","serie","title"]);
   const cS = colonne(tete, ["season_number","season","saison","season_no","s"], ["season","saison"]);
   const cE = colonne(tete, ["episode_number","episode","épisode","number","episode_no","e"], ["episode","épisode","number"]);
-  const cT = colonne(tete, ["tvdb_id","thetvdb_id","tvdb","series_id","show_id"], ["tvdb"]);
+  const cT = colonne(tete, ["tvdb_id","thetvdb_id","tvdb","series_id","show_id","s_id"], ["tvdb"]);
   const cD = colonne(tete, ["watched_at","created_at","date_watched","last_watched","updated_at","date","timestamp"], ["watched","date"]);
 
-  dire("Colonnes détectées : " + [cN >= 0 ? "série=" + tete[cN] : null, cS >= 0 ? "saison=" + tete[cS] : null,
-       cE >= 0 ? "épisode=" + tete[cE] : null, cT >= 0 ? "tvdb=" + tete[cT] : null].filter(Boolean).join("  ") || "aucune");
-  if(cN < 0 && cT < 0){ dire("Impossible de repérer la série. Il faut une colonne de titre ou d'identifiant TVDB."); return; }
-  if(cS < 0 || cE < 0) dire("Pas de colonne saison/épisode : les séries seront ajoutées sans cocher d'épisode.");
+  impr.dire("Colonnes détectées : " + ([cN >= 0 ? "série=" + tete[cN] : null, cS >= 0 ? "saison=" + tete[cS] : null,
+       cE >= 0 ? "épisode=" + tete[cE] : null, cT >= 0 ? "tvdb=" + tete[cT] : null].filter(Boolean).join("  ") || "aucune"));
+  if(cN < 0 && cT < 0){ impr.dire("Impossible de repérer la série : il faut une colonne de titre ou d'identifiant TVDB."); return impr.fermer(); }
+  if(cS < 0 || cE < 0) impr.dire("Pas de colonne saison/épisode : les séries seront ajoutées sans cocher d'épisode.");
 
   const groupes = new Map();
   rows.slice(1).forEach(r => {
@@ -1542,22 +1761,20 @@ async function importerCSV(txt){
     if(!cle) return;
     if(!groupes.has(cle)) groupes.set(cle, { nom, tvdb:/^\d+$/.test(tv) ? tv : null, eps:[] });
     if(cS >= 0 && cE >= 0){
-      const s = parseInt(r[cS], 10), n = parseInt(r[cE], 10);
-      if(!isNaN(s) && !isNaN(n)) groupes.get(cle).eps.push({ s, n, d: cD >= 0 ? r[cD] : null });
+      const s2 = parseInt(r[cS], 10), n2 = parseInt(r[cE], 10);
+      if(!isNaN(s2) && !isNaN(n2)) groupes.get(cle).eps.push({ s:s2, n:n2, d: cD >= 0 ? r[cD] : null });
     }
   });
 
-  dire(groupes.size + " séries repérées, " + (rows.length - 1) + " lignes.");
-  let ok = 0, coches = 0; const rates = [];
-  let i = 0;
+  impr.dire(groupes.size + " séries repérées.");
+  let ok = 0, coches = 0; const rates = []; let i = 0;
   for(const [cle, g] of groupes){
-    i++; avance(Math.round(i / groupes.size * 100));
+    if(state.annuler){ impr.dire("\nInterrompu."); break; }
+    i++; impr.avance(i, groupes.size, (groupes.size - i) * 1.1);
     const etiquette = g.nom || cle;
     try{
-      let sh = null;
-      const deja = Object.values(DB.shows).find(x => x.name.toLowerCase() === etiquette.toLowerCase() || (g.tvdb && String(x.tvdb) === g.tvdb));
-      if(deja) sh = deja;
-      else if(g.tvdb){
+      let sh = Object.values(DB.shows).find(x => x.name.toLowerCase() === etiquette.toLowerCase() || (g.tvdb && String(x.tvdb) === g.tvdb));
+      if(!sh && g.tvdb){
         const lk = await net.get(API + "/lookup/shows?thetvdb=" + g.tvdb);
         if(lk) sh = await fetchShow(lk.id);
       }
@@ -1565,38 +1782,36 @@ async function importerCSV(txt){
         const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(g.nom) + "&embed=episodes");
         if(r){ sh = normShow(r); sh.eps = normEps(r._embedded && r._embedded.episodes); }
       }
-      if(!sh){ rates.push(etiquette); dire("✗ " + etiquette); continue; }
+      if(!sh){ rates.push(etiquette); impr.dire("✗ " + etiquette); continue; }
       if(!DB.shows[sh.id]) ajouterShow(sh, "watching");
       const cible = DB.shows[sh.id];
-      let c = 0, rw = 0;
-      // plusieurs lignes pour le même épisode = autant de visionnages
+      let c2 = 0, rw = 0;
       const paquet = new Map();
-      g.eps.forEach(x => { const k = x.s + "-" + x.n;
-        if(!paquet.has(k)) paquet.set(k, []); paquet.get(k).push(x.d); });
+      g.eps.forEach(x => { const k = x.s + "-" + x.n; if(!paquet.has(k)) paquet.set(k, []); paquet.get(k).push(x.d); });
       paquet.forEach((dates, k) => {
         const [s2, n2] = k.split("-").map(Number);
-        const ep = (cible.eps || []).find(e => e.s === s2 && e.n === n2);
-        if(!ep) return;
-        const avant = vues(ep).length;
-        const cur = vues(ep).slice();
+        const e = (cible.eps || []).find(x => x.s === s2 && x.n === n2);
+        if(!e) return;
+        const avant = vues(e).length;
+        const cur = vues(e).slice();
         while(cur.length < dates.length){
           const d = dates[cur.length];
           cur.push(d && !isNaN(new Date(d)) ? new Date(d).toISOString() : new Date().toISOString());
         }
-        if(cur.length > avant){ c++; rw += Math.max(0, dates.length - 1); poser(ep, cur); }
+        if(cur.length > avant){ c2++; rw += Math.max(0, dates.length - 1); poser(e, cur); }
       });
-      // si tout a été vu N fois, on se place au passage N
       const air = epsOf(cible).filter(diffuse);
       if(air.length) cible.pass = Math.max(1, Math.min.apply(null, air.map(nbVues)));
       autoStatut(cible); sauverShow(cible);
-      coches += c; ok++;
-      dire("✓ " + cible.name + (c ? "  +" + c + " épisodes" : "") + (rw ? "  (" + rw + " revisionnages)" : "") + (cible.pass > 1 ? "  passage " + cible.pass : ""));
-      sauver();
-    }catch(e){ rates.push(etiquette); dire("✗ " + etiquette + " (" + e.message + ")"); }
+      coches += c2; ok++;
+      impr.dire("✓ " + cible.name + (c2 ? "  " + c2 + " épisodes" : "") + (rw ? "  +" + rw + " revisionnages" : ""));
+    }catch(e){ rates.push(etiquette); impr.dire("✗ " + etiquette + " (" + (e && e.message || e) + ")"); }
   }
-  avance(100);
-  dire("\nTerminé : " + ok + " séries, " + coches + " épisodes cochés." + (rates.length ? " " + rates.length + " non trouvées." : ""));
-  sauver(); toast(ok + " séries importées");
+  impr.avance(groupes.size, groupes.size);
+  impr.dire("\nTerminé : " + ok + " séries, " + coches + " épisodes." + (rates.length ? " " + rates.length + " non trouvées." : ""));
+  impr.fermer();
+  toast(ok + " séries importées");
+  majQuota();
 }
 
 async function importerListe(){
@@ -1667,10 +1882,7 @@ document.addEventListener("change", ev => {
     };
     rd.readAsText(f);
   }
-  if(ev.target.id === "f-csv"){
-    rd.onload = () => importerCSV(String(rd.result));
-    rd.readAsText(f);
-  }
+  if(ev.target.id === "f-csv"){ importerFichier(f); ev.target.value = ""; return; }
   ev.target.value = "";
 });
 
