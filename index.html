@@ -160,7 +160,8 @@ nav.tabs{
 
 /* ------------ fiche série ------------- */
 .sheet{position:fixed;inset:0;z-index:60;background:var(--encre);overflow-y:auto;
-  overscroll-behavior:contain;animation:up .22s cubic-bezier(.2,.8,.3,1)}
+  overscroll-behavior:contain}
+.sheet.neuve{animation:up .22s cubic-bezier(.2,.8,.3,1)}
 @keyframes up{from{transform:translateY(16px);opacity:0}to{transform:none;opacity:1}}
 .hero{position:relative;padding:calc(env(safe-area-inset-top) + 14px) 14px 16px;
   background:linear-gradient(180deg,var(--carte) 0%,var(--encre) 100%);
@@ -281,9 +282,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.3.0";
+const VERSION = "1.3.1";
 const SCHEMA  = 2;
 const JOURNAL = [
+  { v:"1.3.1", d:"2026-08-24", t:"Position de lecture", l:[
+    "Cocher un épisode ne renvoie plus en haut de la page : la position est conservée, dans la liste comme dans la fiche.",
+    "Plusieurs saisons peuvent rester dépliées en même temps, et le restent après avoir coché.",
+    "L'animation d'ouverture de la fiche ne se rejoue plus à chaque case cochée."
+  ]},
   { v:"1.3.0", d:"2026-08-24", t:"Stockage IndexedDB", l:[
     "Passage de localStorage à IndexedDB : le plafond de 5 Mo disparaît, la place disponible se compte en centaines de Mo.",
     "Écriture granulaire : cocher un épisode enregistre un seul élément au lieu de resérialiser toute la bibliothèque.",
@@ -641,7 +647,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                saison:null, journal:false, neuf:false,
+                saisons:null, animer:false, retour:0, journal:false, neuf:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
 const PAGE = 60;
@@ -657,7 +663,27 @@ const TABS = [
 /* ============================================================
    RENDU
    ============================================================ */
+/* Le rendu reconstruit le DOM. Sans précaution, le conteneur passe par une
+   hauteur nulle pendant l'échange et le navigateur ramène la page en haut.
+   On fige donc la hauteur le temps du remplacement, puis on rend sa position
+   à la page et au panneau de la fiche, qui a son propre défilement.        */
 function render(){
+  const vueEl = $("#view");
+  const anc = document.querySelector(".sheet");
+  const posSheet = anc ? anc.scrollTop : 0;
+  const posPage = window.scrollY;
+  const hauteur = vueEl.offsetHeight;
+  if(hauteur) vueEl.style.minHeight = hauteur + "px";
+
+  dessiner();
+
+  const neuf = document.querySelector(".sheet");
+  if(neuf && posSheet) neuf.scrollTop = posSheet;
+  if(window.scrollY !== posPage) window.scrollTo(0, posPage);
+  requestAnimationFrame(() => { vueEl.style.minHeight = ""; });
+}
+
+function dessiner(){
   $("#tabs").innerHTML = TABS.map(t => {
     const n = t.id === "upnext" ? listeASuivre().length : 0;
     return '<button class="tab tab-wrap ' + (state.tab === t.id ? "on" : "") + '" data-act="tab" data-id="' + t.id + '">' +
@@ -678,6 +704,11 @@ function render(){
   else                              v.innerHTML = vueReglages();
 
   $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail]) : "";
+  if(state.detail && state.animer){
+    const el = document.querySelector(".sheet");
+    if(el) el.classList.add("neuve");
+    state.animer = false;
+  }
   document.body.style.overflow = state.detail ? "hidden" : "";
 }
 
@@ -995,13 +1026,13 @@ function vueFiche(sh){
   const nx = prochainAVoir(sh), up = prochaineDiffusion(sh);
   const P = passe(sh);
   const saisons = [...new Set(epsOf(sh).map(e => e.s))].sort((x, y) => x - y);
-  const ouverte = state.saison != null ? state.saison : (nx ? nx.s : saisons[saisons.length - 1]);
+  const ouvertes = state.saisons || new Set();
 
   const blocsSaisons = saisons.map(s => {
     const eps = epsOf(sh).filter(e => e.s === s);
     const w = eps.filter(e => vu(e, sh)).length;
     const tous = w === eps.length;
-    return '<details class="season" ' + (s === ouverte ? "open" : "") + '>' +
+    return '<details class="season" data-saison="' + s + '" ' + (ouvertes.has(s) ? "open" : "") + '>' +
       '<summary><h3>' + (s === 0 ? "Spéciaux" : "Saison " + s) + '</h3>' +
       '<span class="mono" style="font-size:11px;color:var(--gris)">' + w + '/' + eps.length + '</span>' +
       '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
@@ -1170,10 +1201,7 @@ document.addEventListener("click", async ev => {
     state.limite = PAGE; render(); toast("Filtres retirés"); return;
   }
   if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
-  if(act === "plus"){
-    state.limite += PAGE;
-    const y = window.scrollY; render(); window.scrollTo(0, y); return;
-  }
+  if(act === "plus"){ state.limite += PAGE; render(); return; }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "close-sheet"){ history.back(); return; }
@@ -1185,16 +1213,18 @@ document.addEventListener("click", async ev => {
     if(act === "upto"){ marquerJusqua(sh, ep); toast("Épisodes précédents marqués vus"); }
     else if(act === "again"){ revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté"); }
     else marquer(ep, sh, !vu(ep, sh));
-    if(state.detail) state.saison = ep.s;
+
     autoStatut(sh); sauverShow(sh);
-    const y = window.scrollY; render(); window.scrollTo(0, y);
+    render();
     return;
   }
   if(act === "season"){
     ev.preventDefault();
     const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
     epsOf(sh).filter(e => e.s === s).forEach(e => marquer(e, sh, on));
-    autoStatut(sh); sauverShow(sh); state.saison = s; render();
+    autoStatut(sh); sauverShow(sh);
+    if(!state.saisons) state.saisons = new Set();
+    state.saisons.add(s); render();
     return;
   }
   if(act === "statut"){
@@ -1209,14 +1239,14 @@ document.addEventListener("click", async ev => {
   if(act === "rewatch"){
     const sh = DB.shows[+id];
     if(!avancement(sh).watched) return toast("Coche d'abord quelques épisodes");
-    nouveauPassage(sh); state.saison = null; render();
+    nouveauPassage(sh); saisonCourante(sh); render();
     toast("Passage " + passe(sh) + " — c'est reparti du début");
     return;
   }
   if(act === "unwatch"){
     const sh = DB.shows[+id];
     if(!confirm("Annuler le passage " + passe(sh) + " ? Les visionnages enregistrés pendant ce passage seront retirés des statistiques.")) return;
-    annulerPassage(sh); state.saison = null; render(); toast("Passage annulé");
+    annulerPassage(sh); saisonCourante(sh); render(); toast("Passage annulé");
     return;
   }
   if(act === "refresh-one"){
@@ -1268,16 +1298,33 @@ document.addEventListener("click", async ev => {
   }
 });
 
+function saisonCourante(sh){
+  const eps = epsOf(sh);
+  const nx = prochainAVoir(sh);
+  const ss = [...new Set(eps.map(e => e.s))].sort((a, b) => a - b);
+  state.saisons = new Set([nx ? nx.s : (ss.length ? ss[ss.length - 1] : 1)]);
+}
 function ouvrirFiche(id){
-  state.detail = id; state.saison = null;
+  state.retour = window.scrollY;
+  state.detail = id; state.animer = true;
+  if(DB.shows[id]) saisonCourante(DB.shows[id]);
   history.pushState({ fiche:id }, "", "#s" + id);
-  render(); window.scrollTo(0, 0);
+  render();
 }
 window.addEventListener("popstate", () => {
-  if(state.detail){ state.detail = null; render(); }
+  if(state.detail){
+    state.detail = null; render();
+    window.scrollTo(0, state.retour || 0);
+  }
 });
 
 document.addEventListener("toggle", ev => {
+  if(ev.target.hasAttribute && ev.target.hasAttribute("data-saison")){
+    const s = Number(ev.target.getAttribute("data-saison"));
+    if(!state.saisons) state.saisons = new Set();
+    if(ev.target.open) state.saisons.add(s); else state.saisons.delete(s);
+    return;
+  }
   if(ev.target.hasAttribute && ev.target.hasAttribute("data-journal")){
     state.journal = ev.target.open;
     if(ev.target.open && state.neuf){ state.neuf = false; DB.meta.vue = VERSION; sauver();
