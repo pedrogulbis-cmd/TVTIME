@@ -24,6 +24,7 @@
   --grain:#fff; --grainO:.035;
   --lisere:rgba(240,234,224,.08);
   --bAir:#4a3f5e; --bFut:#2e2740; --bRev:#3f6b5c;
+  --h1:#1e4a3d; --h2:#2b7059; --h3:#419b77; --h4:#7ee0b8;
   --r:12px;
   --tab:calc(60px + env(safe-area-inset-bottom));
 }
@@ -38,6 +39,7 @@ html[data-theme="clair"]{
   --grain:#000; --grainO:.02;
   --lisere:rgba(34,27,46,.1);
   --bAir:#b7abcb; --bFut:#e5dfee; --bRev:#8fc9b4;
+  --h1:#cdeade; --h2:#93d2ba; --h3:#4fae8c; --h4:#0f7a5a;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -252,6 +254,25 @@ nav.tabs{
 .bar .tr{flex:1;height:8px;background:var(--carte2);border-radius:4px;overflow:hidden}
 .bar .fl{height:100%;background:var(--signal);border-radius:4px}
 .bar .vl{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--gris);min-width:48px;text-align:right}
+/* Carte d'activité : une colonne par semaine, une ligne par jour. */
+.hm{display:grid;grid-auto-flow:column;grid-template-rows:repeat(7,5px);gap:1.5px;justify-content:start}
+.hm i{width:5px;height:5px;border-radius:1.5px;background:var(--carte2)}
+.hm i.o{background:transparent}
+.hm i.n1{background:var(--h1)}
+.hm i.n2{background:var(--h2)}
+.hm i.n3{background:var(--h3)}
+.hm i.n4{background:var(--h4)}
+.hmx{display:grid;grid-auto-flow:column;grid-auto-columns:5px;gap:1.5px;justify-content:start;margin-bottom:4px}
+.hmx span{font-family:"IBM Plex Mono",monospace;font-size:8.5px;color:var(--gris);white-space:nowrap}
+.hml{display:flex;align-items:center;gap:4px;margin-top:9px;font-family:"IBM Plex Mono",monospace;
+  font-size:10px;color:var(--gris)}
+.hml i{width:5px;height:5px;border-radius:1.5px;background:var(--carte2);display:block}
+@media(min-width:520px){
+  .hm{grid-template-rows:repeat(7,9px);gap:3px}
+  .hm i{width:9px;height:9px;border-radius:2px}
+  .hmx{grid-auto-columns:9px;gap:3px}
+  .hmx span{font-size:10px}
+}
 .spark{display:flex;align-items:flex-end;gap:3px;height:74px;margin-top:6px}
 .spark div{flex:1;background:var(--carte2);border-radius:3px 3px 0 0;position:relative;min-height:2px}
 .spark div.hot{background:var(--signal)}
@@ -339,9 +360,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.13.0";
+const VERSION = "1.14.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.14.0", d:"2026-08-25", t:"Mémoire et entretien", l:[
+    "Carte d'activité annuelle : une case par jour, du plus clair au plus dense, avec sélection de l'année.",
+    "Rétrospective : épisodes, films, temps d'écran, jours actifs, séries les plus regardées, mois le plus chargé et journée record.",
+    "Chaque fiche série estime sa date de fin à partir de ton rythme réel des trois derniers mois.",
+    "Deux facettes de plus dans Ma liste : décennie de sortie et temps restant à voir.",
+    "Section Entretien dans les Réglages : détection des doublons avec fusion des visionnages, réparation des séries vides, nettoyage des épisodes hors catalogue."
+  ]},
   { v:"1.13.0", d:"2026-08-25", t:"Où regarder, mise à jour ciblée, annulation", l:[
     "Les fiches séries et films indiquent sur quelles plateformes le contenu est disponible dans le pays choisi.",
     "Le pays se règle dans les Réglages ; les disponibilités viennent de JustWatch via TMDb et sont conservées douze jours.",
@@ -881,6 +909,26 @@ function viser(){
   window.scrollTo(0, y < 140 ? 0 : y);
   return true;
 }
+/* Rythme réel des 90 derniers jours, en épisodes par jour. */
+function rythme(){
+  const limite = Date.now() - 90 * 86400000;
+  let n = 0;
+  Object.values(DB.watched).forEach(v => (Array.isArray(v) ? v : [v]).forEach(ts => {
+    if(Date.parse(ts) >= limite) n++;
+  }));
+  return n / 90;
+}
+function projection(sh){
+  const eps = epsOf(sh).filter(e => diffuse(e) && !vu(e, sh)).length;
+  if(!eps) return null;
+  const r = rythme();
+  if(r < 0.05) return { eps, texte:"Pas assez d'historique récent pour estimer une date." };
+  const jours = Math.ceil(eps / r);
+  const fin = new Date(Date.now() + jours * 86400000);
+  const iso = fin.getFullYear() + "-" + p2(fin.getMonth() + 1) + "-" + p2(fin.getDate());
+  return { eps, jours, texte:"À ton rythme actuel (" + r.toFixed(1).replace(".", ",") +
+    " épisode" + (r >= 2 ? "s" : "") + " par jour), terminée le " + frDate(iso) + "." };
+}
 function revuTexte(sh){
   const t = tours(sh), r = episodesRevus(sh);
   if(t >= 2) return { court:"↺" + t, long:"Vue " + t + " fois en entier" +
@@ -935,6 +983,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
+                anStats:"", fAnnee:"", fReste:"", doublons:null,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -1106,6 +1155,12 @@ function vueListe(){
   if(state.plateforme) l = l.filter(sh => (sh.network || "—") === state.plateforme);
   if(state.diffusion === "running") l = l.filter(sh => sh.status === "Running");
   if(state.diffusion === "ended")   l = l.filter(sh => sh.status !== "Running");
+  if(state.fAnnee) l = l.filter(sh => sh.premiered && sh.premiered.slice(0, 3) + "0" === state.fAnnee);
+  if(state.fReste){
+    const seuils = { court:[1, 120], moyen:[120, 300], long:[300, 900], enorme:[900, 1e9] };
+    const [min, max] = seuils[state.fReste] || [0, 1e9];
+    l = l.filter(sh => { const r = tempsRestant(sh); return r >= min && r < max; });
+  }
 
   /* --- tri --- */
   const t = state.tri;
@@ -1128,7 +1183,8 @@ function vueListe(){
       .forEach(x => m.set(x, (m.get(x) || 0) + 1)));
     return [...m.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   };
-  const actifs = (state.genre ? 1 : 0) + (state.plateforme ? 1 : 0) + (state.diffusion ? 1 : 0);
+  const actifs = (state.genre ? 1 : 0) + (state.plateforme ? 1 : 0) + (state.diffusion ? 1 : 0) +
+                 (state.fAnnee ? 1 : 0) + (state.fReste ? 1 : 0);
 
   /* --- barre de recherche --- */
   const barre = '<div style="padding-top:14px"></div><div class="search">' +
@@ -1151,6 +1207,18 @@ function vueListe(){
       '<div class="eyebrow" style="margin:14px 0 8px">Diffusion</div><div class="chips">' +
         [["", "Peu importe"], ["running", "En production"], ["ended", "Terminée"]].map(([k, lb]) =>
           '<button class="chip ' + ((state.diffusion || "") === k ? "on" : "") + '" data-act="diffusion" data-id="' + k + '">' + lb + '</button>').join("") +
+      '</div>' +
+      (function(){
+        const d = new Map();
+        tout.forEach(sh => { if(sh.premiered) { const k = sh.premiered.slice(0, 3) + "0"; d.set(k, (d.get(k) || 0) + 1); } });
+        const l2 = [...d.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+        return l2.length ? '<div class="eyebrow" style="margin:14px 0 8px">Décennie de sortie</div><div class="chips" style="flex-wrap:wrap">' +
+          l2.map(([k, v]) => '<button class="chip ' + (state.fAnnee === k ? "on" : "") + '" data-act="annee" data-id="' + k + '">' +
+            k + 's <b class="mono" style="opacity:.6">' + v + '</b></button>').join("") + '</div>' : "";
+      })() +
+      '<div class="eyebrow" style="margin:14px 0 8px">Reste à voir</div><div class="chips" style="flex-wrap:wrap">' +
+        [["court", "Moins de 2 h"], ["moyen", "2 à 5 h"], ["long", "5 à 15 h"], ["enorme", "Plus de 15 h"]].map(([k, lb]) =>
+          '<button class="chip ' + (state.fReste === k ? "on" : "") + '" data-act="reste" data-id="' + k + '">' + lb + '</button>').join("") +
       '</div>' +
       (actifs ? '<button class="btn full" style="margin-top:14px" data-act="reset-filtres">Retirer les filtres</button>' : "") +
     '</div>' : "";
@@ -1546,7 +1614,87 @@ function vueAgenda(){
   }).join("");
 }
 
-/* ---------- vue : Stats ---------- */
+/* ---------- activité datée ----------
+   Tous les visionnages, épisodes et films confondus, regroupés par jour.
+   La bibliothèque en compte des dizaines de milliers : on indexe une fois. */
+function activiteParJour(){
+  const m = new Map();
+  const compter = ts => {
+    const k = String(ts).slice(0, 10);
+    if(k.length === 10) m.set(k, (m.get(k) || 0) + 1);
+  };
+  Object.values(DB.watched).forEach(v => (Array.isArray(v) ? v : [v]).forEach(compter));
+  Object.values(DB.films).forEach(f => (f.vu || []).forEach(compter));
+  return m;
+}
+function indexEpisodes(){
+  const m = new Map();
+  Object.values(DB.shows).forEach(sh => (sh.eps || []).forEach(e => m.set(String(e.i), { sh, e })));
+  return m;
+}
+function anneesActives(jours){
+  const a = new Set();
+  jours.forEach((v, k) => a.add(k.slice(0, 4)));
+  return [...a].sort((x, y) => y.localeCompare(x));
+}
+const niveau = n => n >= 7 ? 4 : n >= 4 ? 3 : n >= 2 ? 2 : n >= 1 ? 1 : 0;
+
+function carteAnnee(an, jours){
+  const debut = new Date(an + "-01-01T12:00:00");
+  const cases = [], entetes = [];
+  const d = new Date(debut);
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // reculer au lundi
+  let moisVu = -1;
+  for(let c = 0; c < 53; c++){
+    const premier = new Date(d);
+    premier.setDate(premier.getDate() + c * 7);
+    const m = premier.getMonth();
+    entetes.push(premier.getFullYear() === +an && m !== moisVu && premier.getDate() <= 7
+      ? (moisVu = m, MOIS[m][0].toUpperCase()) : "");
+    for(let j = 0; j < 7; j++){
+      const jour = new Date(d);
+      jour.setDate(jour.getDate() + c * 7 + j);
+      if(jour.getFullYear() !== +an){ cases.push('<i class="o"></i>'); continue; }
+      const k = jour.getFullYear() + "-" + p2(jour.getMonth() + 1) + "-" + p2(jour.getDate());
+      const n = jours.get(k) || 0;
+      cases.push('<i class="n' + niveau(n) + '" title="' + frDate(k) + ' — ' +
+        (n ? n + " visionnage" + (n > 1 ? "s" : "") : "rien") + '"></i>');
+    }
+  }
+  // remise en ordre : la grille se remplit colonne par colonne
+  const ordre = [];
+  for(let j = 0; j < 7; j++) for(let c = 0; c < 53; c++) ordre.push(cases[c * 7 + j]);
+  return '<div class="hmx">' + entetes.map(x => '<span>' + x + '</span>').join("") + '</div>' +
+    '<div class="hm">' + cases.join("") + '</div>' +
+    '<div class="hml"><span>moins</span><i></i><i class="n1"></i><i class="n2"></i><i class="n3"></i><i class="n4"></i><span>plus</span></div>';
+}
+
+/* ---------- rétrospective d'une année ---------- */
+function retrospective(an, jours, idx){
+  let eps = 0, mins = 0;
+  const parSerie = new Map(), parMois = new Array(12).fill(0);
+  Object.keys(DB.watched).forEach(k => {
+    const v = DB.watched[k]; if(!Array.isArray(v)) return;
+    const ref = idx.get(String(k)); if(!ref) return;
+    v.forEach(ts => {
+      if(String(ts).slice(0, 4) !== an) return;
+      eps++;
+      mins += ref.e.r || ref.sh.runtime || 42;
+      parMois[+String(ts).slice(5, 7) - 1]++;
+      parSerie.set(ref.sh.name, (parSerie.get(ref.sh.name) || 0) + 1);
+    });
+  });
+  let films = 0, minsF = 0;
+  Object.values(DB.films).forEach(f => (f.vu || []).forEach(ts => {
+    if(String(ts).slice(0, 4) === an){ films++; minsF += f.duree || 100; }
+  }));
+  const top = [...parSerie.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+  const meilleurMois = parMois.indexOf(Math.max(...parMois));
+  let record = ["", 0];
+  jours.forEach((v, k) => { if(k.slice(0, 4) === an && v > record[1]) record = [k, v]; });
+  const nbJours = [...jours.keys()].filter(k => k.slice(0, 4) === an).length;
+  return { eps, mins, films, minsF, top, meilleurMois, parMois, record, nbJours };
+}
 function vueStats(){
   const shows = Object.values(DB.shows);
   if(!shows.length && !Object.keys(DB.films).length)
@@ -1606,7 +1754,38 @@ function vueStats(){
         .map(([x, l]) => '<div class="stat"><div class="n">' + esc(x) + '</div><div class="l">' + l + '</div></div>').join("") +
       '</div>' : "";
 
-  return '<div class="eyebrow">Séries</div><div class="grid2">' + cartes + '</div>' + blocFilms +
+  const jours = activiteParJour();
+  const ans = anneesActives(jours);
+  const an = ans.includes(state.anStats) ? state.anStats : (ans[0] || String(new Date().getFullYear()));
+  let blocAnnee = "";
+  if(ans.length){
+    const r = retrospective(an, jours, indexEpisodes());
+    const chipsAns = '<div class="chips" style="margin-top:10px">' + ans.slice(0, 15).map(x =>
+      '<button class="chip ' + (x === an ? "on" : "") + '" data-act="an-stats" data-id="' + x + '">' + x + '</button>').join("") + '</div>';
+    const bilan = [
+      [r.eps, "épisodes"], [dureeLongue(r.mins + r.minsF), "d'écran"],
+      [r.films, "films"], [r.nbJours, "jours actifs"]
+    ].map(([x, l]) => '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + esc(x) +
+      '</div><div class="l">' + l + '</div></div>').join("");
+    const maxS = r.top.length ? r.top[0][1] : 1;
+    const palmares = r.top.map(([nom, n]) => '<div class="bar"><div class="lb">' + esc(nom) + '</div>' +
+      '<div class="tr"><div class="fl" style="width:' + (n / maxS * 100) + '%"></div></div>' +
+      '<div class="vl">' + n + ' ép.</div></div>').join("");
+    blocAnnee = '<div class="eyebrow">Carte d\'activité</div>' + chipsAns +
+      '<div class="box" style="margin-top:9px;overflow:hidden">' + carteAnnee(an, jours) + '</div>' +
+      (r.eps || r.films
+        ? '<div class="eyebrow">Rétrospective ' + an + '</div>' +
+          '<div class="grid2">' + bilan + '</div>' +
+          '<div class="box" style="margin-top:9px">' +
+            (palmares ? '<div class="note" style="margin-bottom:5px">Les plus regardées</div>' + palmares : "") +
+            '<p class="note" style="margin-top:11px">Mois le plus chargé : <b style="color:var(--papier)">' +
+              MOIS[r.meilleurMois] + '</b> avec ' + r.parMois[r.meilleurMois] + ' épisodes.' +
+            (r.record[1] > 1 ? ' Journée record : <b style="color:var(--papier)">' + frDate(r.record[0]) +
+              '</b>, ' + r.record[1] + ' visionnages.' : "") + '</p></div>'
+        : '<div class="box" style="margin-top:9px"><p class="note">Aucun visionnage enregistré en ' + an + '.</p></div>');
+  }
+
+  return '<div class="eyebrow">Séries</div><div class="grid2">' + cartes + '</div>' + blocFilms + blocAnnee +
     '<div class="eyebrow">Activité sur 12 mois</div><div class="box">' + spark + '</div>' +
     (top ? '<div class="eyebrow">Temps par série</div><div class="box">' + top + '</div>' : "") +
     (genres ? '<div class="eyebrow">Genres</div><div class="chips" style="flex-wrap:wrap">' + genres + '</div>' : "");
@@ -1725,6 +1904,7 @@ function vueFiche(sh){
       '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:7px">' + dureeLongue(tempsVu(sh)) + ' de visionnage' +
       (P > 1 ? ' · <span style="color:var(--signal)">passage ' + P + '</span>' : "") + '</div>' +
       (revuTexte(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(revuTexte(sh).long) + '</div>' : "") +
+      (projection(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(projection(sh).texte) + '</div>' : "") +
       '</div></div>' +
       (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
         svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>'
@@ -1756,6 +1936,83 @@ function vueFiche(sh){
       '<button class="btn dgr full" style="margin-top:9px" data-act="remove" data-id="' + sh.id + '">' +
         svg("poubelle", 16) + ' Retirer la série</button>' +
     '</div></div>';
+}
+
+/* ============================================================
+   ENTRETIEN — doublons et vérification
+   ============================================================ */
+const clefTitre = t => norm(t).replace(/[^a-z0-9]/g, "");
+
+/* Deux fiches distinctes pour la même série : cela arrive quand deux imports
+   retrouvent des entrées différentes du catalogue, une version originale et
+   un remake, ou un titre traduit. On rapproche sur le titre réduit et sur les
+   identifiants externes, jamais sur une simple ressemblance. */
+function doublons(){
+  const l = Object.values(DB.shows);
+  const groupes = new Map();
+  const ajouter = (cle, sh) => {
+    if(!cle) return;
+    if(!groupes.has(cle)) groupes.set(cle, new Set());
+    groupes.get(cle).add(sh);
+  };
+  l.forEach(sh => {
+    ajouter("t:" + clefTitre(sh.name), sh);
+    if(sh.imdb) ajouter("i:" + sh.imdb, sh);
+    if(sh.tvdb) ajouter("d:" + sh.tvdb, sh);
+  });
+  const vus = new Set(), paires = [];
+  groupes.forEach(set => {
+    if(set.size < 2) return;
+    const arr = [...set].sort((a, b) => avancement(b).watched - avancement(a).watched || (a.addedAt || 0) - (b.addedAt || 0));
+    const signature = arr.map(x => x.id).sort().join("-");
+    if(vus.has(signature)) return;
+    vus.add(signature);
+    paires.push(arr);
+  });
+  return paires;
+}
+function fusionner(gardeId, perdusIds){
+  const garde = DB.shows[gardeId];
+  if(!garde) return 0;
+  let repris = 0;
+  perdusIds.forEach(pid => {
+    const perdu = DB.shows[pid];
+    if(!perdu || perdu.id === garde.id) return;
+    (perdu.eps || []).forEach(e => {
+      const v = vues(e);
+      if(!v.length) return;
+      const cible = (garde.eps || []).find(x => x.s === e.s && x.n === e.n);
+      if(cible){
+        const fus = [...new Set([...vues(cible), ...v])].sort();
+        if(fus.length > vues(cible).length) repris++;
+        poser(cible, fus);
+      }
+      delete DB.watched[e.i]; salirVues(e.i);
+    });
+    if(perdu.archive) garde.archive = true;
+    garde.activite = Math.max(garde.activite || 0, perdu.activite || 0);
+    delete DB.shows[pid];
+    sale.shows.delete(String(pid));
+    sale.suppr.add(String(pid));
+  });
+  autoStatut(garde); sauverShow(garde);
+  return repris;
+}
+
+/* Contrôles de cohérence sur l'ensemble de la bibliothèque. */
+function verifier(){
+  const shows = Object.values(DB.shows);
+  const connus = new Set();
+  shows.forEach(sh => (sh.eps || []).forEach(e => connus.add(String(e.i))));
+  const orphelins = Object.keys(DB.watched).filter(k => !connus.has(String(k)));
+  return {
+    vides: shows.filter(sh => !(sh.eps || []).length),
+    sansAffiche: shows.filter(sh => !sh.poster),
+    orphelins,
+    orphelinsVues: orphelins.reduce((t, k) => t + (DB.watched[k] || []).length, 0),
+    filmsSansDuree: Object.values(DB.films).filter(f => !f.duree),
+    doublons: doublons().length
+  };
 }
 
 /* ---------- vue : Réglages ---------- */
@@ -1863,6 +2120,38 @@ function vueReglages(){
     '<b>La langue ne s\'applique pas aux séries.</b> Elles viennent de TVmaze, qui publie titres, synopsis et noms d\'épisodes ' +
     'dans la langue d\'origine sans proposer de traduction. Ce réglage ne peut donc rien y changer.</p></div>' +
 
+  (function(){
+    const v = verifier();
+    const soucis = v.vides.length + v.orphelins.length + v.doublons + v.sansAffiche.length;
+    const ligne = (n, txt, act, cls) => n
+      ? '<div class="sw"><div class="info"><div>' + n + ' ' + txt + '</div></div>' +
+        (act ? '<button class="btn sm ' + (cls || "") + '" data-act="' + act + '">' + (cls === "dgr" ? "Nettoyer" : "Traiter") + '</button>' : "") + '</div>'
+      : "";
+    return '<div class="eyebrow">Entretien</div><div class="box">' +
+      (soucis
+        ? '<h3>' + soucis + ' points à regarder</h3>' +
+          ligne(v.doublons, v.doublons > 1 ? "séries en double" : "série en double", "voir-doublons") +
+          ((state.doublons || []).length
+            ? '<div style="margin-top:11px">' + state.doublons.map((g, i) =>
+                '<div class="sw"><div class="info"><div>' + esc((DB.shows[g[0]] || {}).name || "?") + '</div>' +
+                '<div class="note">' + g.slice(1).map(x => esc((DB.shows[x] || {}).name || "?")).join(", ") +
+                ' → à fusionner dedans</div></div>' +
+                '<button class="btn sm pri" data-act="fusionner" data-id="' + i + '">Fusionner</button></div>').join("") + '</div>'
+            : "") +
+          ligne(v.vides.length, v.vides.length > 1 ? "séries sans aucun épisode" : "série sans aucun épisode", "reparer-vides") +
+          ligne(v.orphelins.length, "épisodes cochés hors catalogue (" + v.orphelinsVues + " visionnages)", "purger-orphelins", "dgr") +
+          ligne(v.sansAffiche.length, v.sansAffiche.length > 1 ? "séries sans affiche" : "série sans affiche", "") +
+          ligne(v.filmsSansDuree.length, "films sans durée connue", "") +
+          '<p class="note" style="margin-top:11px">Les séries sans épisode viennent le plus souvent d\'un import où le catalogue n\'a rien renvoyé. ' +
+          'Les épisodes hors catalogue sont des visionnages dont l\'épisode a disparu ou changé d\'identifiant : leur temps compte encore dans les statistiques sans être rattaché à rien.</p>'
+        : '<h3>Bibliothèque saine</h3><p class="note">Aucun doublon, aucun épisode orphelin, aucune série vide.</p>') +
+      '<div class="pgt hide" id="ent-bar"><i></i></div>' +
+      '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
+        '<div class="mono" id="ent-etat" style="font-size:11px;color:var(--gris);flex:1"></div>' +
+        '<button class="btn sm dgr hide" id="ent-stop" data-act="stop-import">Interrompre</button></div>' +
+      '<div class="log hide" id="ent-log"></div></div>';
+  })() +
+
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + ' / ' + nf + '</div><div class="l">séries / films</div></div>' +
@@ -1953,12 +2242,15 @@ document.addEventListener("click", async ev => {
     DB.settings.tri = id; sauver();   // le choix est retenu d'une session à l'autre
     render(); window.scrollTo(0, 0); return;
   }
+  if(act === "an-stats"){ state.anStats = id; render(); return; }
   if(act === "panneau"){ state.panneau = !state.panneau; render(); return; }
   if(act === "genre"){ state.genre = state.genre === id ? "" : id; state.limite = PAGE; render(); return; }
   if(act === "plateforme"){ state.plateforme = state.plateforme === id ? "" : id; state.limite = PAGE; render(); return; }
   if(act === "diffusion"){ state.diffusion = id; state.limite = PAGE; render(); return; }
+  if(act === "annee"){ state.fAnnee = state.fAnnee === id ? "" : id; state.limite = PAGE; render(); return; }
+  if(act === "reste"){ state.fReste = state.fReste === id ? "" : id; state.limite = PAGE; render(); return; }
   if(act === "reset-filtres"){
-    state.genre = state.plateforme = state.diffusion = state.ql = "";
+    state.genre = state.plateforme = state.diffusion = state.ql = state.fAnnee = state.fReste = "";
     state.limite = PAGE; render(); toast("Filtres retirés"); return;
   }
   if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
@@ -2178,6 +2470,60 @@ document.addEventListener("click", async ev => {
   if(act === "export-json") return exportJSON();
   if(act === "export-csv")  return exportCSV();
   if(act === "import-list") return importerListe();
+  if(act === "voir-doublons"){
+    impr.ouvrir("ent");
+    const paires = doublons();
+    impr.dire(paires.length + (paires.length > 1 ? " groupes de doublons." : " groupe de doublons."));
+    paires.forEach(g => {
+      impr.dire("\n" + g.map(sh => sh.name + " [" + sh.id + "] " + avancement(sh).watched + " vus").join("\n   ↔ "));
+    });
+    impr.dire("\nLa fusion garde la fiche la mieux avancée et lui transfère les visionnages des autres, épisode par épisode.");
+    state.doublons = paires.map(g => g.map(sh => sh.id));
+    impr.fermer(); render();
+    return;
+  }
+  if(act === "fusionner"){
+    const g = (state.doublons || [])[+id];
+    if(!g || g.length < 2) return;
+    const garde = DB.shows[g[0]];
+    if(!confirm("Fusionner sur « " + garde.name + " » ?\n\nLes visionnages des " + (g.length - 1) +
+      " autre(s) fiche(s) y seront reportés, puis ces fiches seront supprimées.")) return;
+    const n = fusionner(g[0], g.slice(1));
+    state.doublons = state.doublons.filter((x, i) => i !== +id);
+    render();
+    toast(n + " épisodes repris sur « " + garde.name + " »");
+    return;
+  }
+  if(act === "purger-orphelins"){
+    const v = verifier();
+    if(!v.orphelins.length) return toast("Rien à nettoyer");
+    if(!confirm("Retirer " + v.orphelinsVues + " visionnages rattachés à des épisodes qui n'existent plus au catalogue ?\n\nCette action est définitive.")) return;
+    v.orphelins.forEach(k => { delete DB.watched[k]; salirVues(k); });
+    sauver(); render();
+    toast(v.orphelins.length + " épisodes orphelins retirés");
+    return;
+  }
+  if(act === "reparer-vides"){
+    const v = verifier();
+    if(!v.vides.length) return toast("Rien à réparer");
+    impr.ouvrir("ent");
+    impr.dire(v.vides.length + " séries sans épisode à retélécharger.");
+    let ok = 0;
+    for(let i = 0; i < v.vides.length; i++){
+      if(state.annuler){ impr.dire("\nInterrompu."); break; }
+      impr.avance(i + 1, v.vides.length, (v.vides.length - i) * 0.55);
+      const s2 = v.vides[i];
+      try{
+        const sh = await fetchShow(s2.id);
+        if(sh && (sh.eps || []).length){ ajouterShow(sh, s2.userStatus); ok++; impr.dire("✓ " + sh.name + "  " + sh.eps.length + " épisodes"); }
+        else impr.dire("✗ " + s2.name + "  toujours vide au catalogue");
+      }catch(e){ impr.dire("✗ " + s2.name); }
+    }
+    impr.dire("\n" + ok + " séries réparées.");
+    impr.fermer(); render();
+    toast(ok + " séries réparées");
+    return;
+  }
   if(act === "maj-ciblee") return actualiserMaj();
   if(act === "refresh-all"){
     if(!confirm("Retélécharger l'intégralité des séries ?\n\nCompte environ une seconde par série. « Actualiser les séries modifiées » suffit dans presque tous les cas.")) return;
