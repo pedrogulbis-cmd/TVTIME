@@ -397,9 +397,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.18.0";
+const VERSION = "1.19.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.19.0", d:"2026-08-25", t:"Agenda filtrable", l:[
+    "Filtre de période : 7 jours, 30 jours, 3 mois, ou tout. L'affichage par défaut ne change pas.",
+    "Trois filtres : favoris, reprises de saison, et séries dont tu es à jour.",
+    "Les reprises de saison portent une pastille, pour les repérer parmi les diffusions hebdomadaires.",
+    "Bascule entre regroupement par date et regroupement par série.",
+    "Affichage par paquets de 60 diffusions, comme les autres onglets.",
+    "L'en-tête indique le nombre de diffusions et le nombre de séries concernées."
+  ]},
   { v:"1.18.0", d:"2026-08-25", t:"Compte à rebours et rattrapage", l:[
     "L'Agenda, la fiche et les cartes affichent le temps restant avant diffusion plutôt qu'une date seule.",
     "L'horodatage complet publié par TVmaze est désormais conservé pour les épisodes à venir : le décompte tient compte du fuseau, une série diffusée à 22 h heure de l'Est arrive à 4 h du matin ici.",
@@ -1086,6 +1094,7 @@ const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"rec
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
                 fAnnee:"", fReste:"", doublons:null, tirage:null,
                 panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
+                periodeA:"tout", filtreA:"all", vueA:"date", limiteA:60,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -1805,6 +1814,93 @@ function vueTirage(){
 }
 
 /* ---------- vue : Agenda ---------- */
+const PERIODES  = [["tout","Tout"],["7","7 jours"],["30","30 jours"],["90","3 mois"]];
+const FILTRES_A = [["all","Tous"],["fav","Favoris"],["premieres","Reprises de saison"],["ajour","Séries à jour"]];
+
+function vueAgenda(){
+  const t = todayISO();
+  const dans = j => { const d = new Date(t + "T12:00:00"); d.setDate(d.getDate() + j);
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()); };
+
+  const tout = [];
+  Object.values(DB.shows).forEach(sh => {
+    if(sh.userStatus === "dropped" || sh.archive) return;
+    epsOf(sh).forEach(e => { if(e.d && e.d >= t) tout.push({ sh, e }); });
+  });
+  if(!tout.length) return '<div class="empty" style="padding-top:60px"><h3>Rien de programmé</h3>' +
+    '<p>Aucune date de diffusion connue pour tes séries.</p></div>';
+
+  let l = tout;
+  if(state.periodeA !== "tout"){
+    const fin = dans(+state.periodeA);
+    l = l.filter(x => x.e.d <= fin);
+  }
+  if(state.filtreA === "fav")            l = l.filter(x => x.sh.favorite);
+  else if(state.filtreA === "premieres") l = l.filter(x => x.e.n === 1);
+  else if(state.filtreA === "ajour")     l = l.filter(x => !prochainAVoir(x.sh));
+  l = l.slice().sort((a, b) => a.e.d.localeCompare(b.e.d) || a.sh.name.localeCompare(b.sh.name));
+
+  const periodes = '<div class="chips" style="margin-top:14px">' + PERIODES.map(([k, lb]) =>
+    '<button class="chip ' + (state.periodeA === k ? "on" : "") + '" data-act="periode-a" data-id="' + k + '">' + lb + '</button>').join("") + '</div>';
+  const filtres = '<div class="chips" style="margin-top:6px">' + FILTRES_A.map(([k, lb]) =>
+    '<button class="chip ' + (state.filtreA === k ? "on" : "") + '" data-act="filtre-a" data-id="' + k + '">' + lb + '</button>').join("") +
+    '<button class="chip ' + (state.vueA === "serie" ? "on" : "") + '" data-act="vue-a">' +
+    (state.vueA === "serie" ? "Groupé par série" : "Groupé par date") + '</button></div>';
+
+  const nbSeries = new Set(l.map(x => x.sh.id)).size;
+  const entete = '<div class="eyebrow">' +
+    (state.periodeA === "tout" ? "À venir" : "Prochains " + (PERIODES.find(x => x[0] === state.periodeA) || ["",""])[1]) +
+    ' <b>' + l.length + '</b><span style="letter-spacing:.04em">' + nbSeries + ' série' + (nbSeries > 1 ? "s" : "") + '</span></div>';
+
+  if(!l.length) return periodes + filtres + entete +
+    '<div class="empty"><p>Aucune diffusion ne correspond à ces critères.</p></div>';
+
+  const vus = l.slice(0, state.limiteA);
+  const suite = l.length > vus.length
+    ? '<button class="btn full" style="margin-top:12px" data-act="plus-a">Afficher ' +
+      Math.min(PAGE, l.length - vus.length) + ' diffusions de plus <span class="mono" style="color:var(--gris)">(' +
+      vus.length + '/' + l.length + ')</span></button>' : "";
+
+  const ligne = x => {
+    const cr = compteRebours(x.e);
+    return '<button class="card row" data-act="open" data-id="' + x.sh.id + '">' + affiche(x.sh) +
+      '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(x.sh.name) + '</div>' +
+      '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px"><span class="code">S' + p2(x.e.s) + 'E' + p2(x.e.n || 0) + '</span>' +
+      (x.e.n === 1 ? '<span class="code pass">Reprise</span>' : "") +
+      (cr ? '<span class="code ' + (cr.precis ? "next" : "") + '">' + esc(cr.txt) + '</span>' : "") + '</div>' +
+      '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(x.e.t || "Épisode") + '</div></div></button>';
+  };
+
+  if(state.vueA === "serie"){
+    const par = new Map();
+    vus.forEach(x => { if(!par.has(x.sh.id)) par.set(x.sh.id, []); par.get(x.sh.id).push(x); });
+    const blocs = [...par.values()].sort((a, b) => a[0].e.d.localeCompare(b[0].e.d)).map(g =>
+      '<div class="eyebrow" style="margin:16px 0 8px">' + esc(g[0].sh.name) + ' <b>' + g.length + '</b></div>' +
+      '<div class="stack">' + g.map(ligne).join("") + '</div>').join("");
+    return periodes + filtres + entete + blocs + suite;
+  }
+
+  const s7 = dans(7), s30 = dans(31);
+  const groupes = [
+    ["Cette semaine", vus.filter(x => x.e.d < s7)],
+    ["Ce mois-ci",    vus.filter(x => x.e.d >= s7 && x.e.d < s30)],
+    ["Plus tard",     vus.filter(x => x.e.d >= s30)]
+  ];
+  const corps = groupes.filter(g => g[1].length).map(([titre, arr]) => {
+    let jour = "";
+    const lignes = arr.map(x => {
+      let h = "";
+      if(x.e.d !== jour){ jour = x.e.d;
+        h = '<div class="eyebrow" style="margin:14px 0 8px">' + (x.e.d === t ? "Aujourd'hui · " : "") + frDate(x.e.d) + '</div>'; }
+      return h + ligne(x);
+    }).join("");
+    return '<div class="eyebrow" style="margin-top:18px">' + titre + ' <b>' + arr.length + '</b></div><div class="stack">' + lignes + '</div>';
+  }).join("");
+
+  return periodes + filtres + entete + corps + suite;
+}
+
+/* ---------- vue : Agenda ---------- */
 function vueAgenda(){
   const out = [];
   Object.values(DB.shows).forEach(sh => {
@@ -2475,7 +2571,7 @@ document.addEventListener("click", async ev => {
 
   if(act === "tab"){
     state.cherche = false;
-    if(state.tab !== id){ state.limite = PAGE; state.limiteF = PAGE; state.vise = null; }
+    if(state.tab !== id){ state.limite = PAGE; state.limiteF = PAGE; state.limiteA = PAGE; state.vise = null; }
     state.tab = id; render(); window.scrollTo(0, 0); return;
   }
   if(act === "changelog"){
@@ -2623,6 +2719,10 @@ document.addEventListener("click", async ev => {
   if(act === "tri-f"){ state.triF = id; state.limiteF = PAGE; render(); window.scrollTo(0, 0); return; }
   if(act === "vider-qlf"){ state.qlF = ""; state.limiteF = PAGE; render(); return; }
   if(act === "plus-f"){ state.limiteF += PAGE; render(); return; }
+  if(act === "periode-a"){ state.periodeA = id; state.limiteA = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "filtre-a"){ state.filtreA = id; state.limiteA = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "vue-a"){ state.vueA = state.vueA === "serie" ? "date" : "serie"; state.limiteA = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "plus-a"){ state.limiteA += PAGE; render(); return; }
   if(act === "archiver"){
     const sh = DB.shows[+id]; if(!sh) return;
     sh.archive = !sh.archive; sauverShow(sh); render();
