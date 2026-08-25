@@ -170,7 +170,14 @@ nav.tabs{
 .op:active{transform:scale(.92)}
 .op.on{color:var(--signal);border-color:var(--signalB);background:var(--signalF)}
 .op.vu{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
-.ops{gap:6px}
+.ops{gap:6px;align-items:stretch}
+.opsrow{display:flex;gap:6px;justify-content:flex-end}
+/* Bouton « épisode suivant » : orange d'action, jamais vert — le vert est
+   réservé à ce qui est déjà vu, et prêtait à confusion ici. */
+.opnext{display:flex;align-items:center;justify-content:center;gap:5px;height:32px;padding:0 8px;
+  border-radius:9px;border:1px solid var(--signalB);background:var(--signalF);color:var(--signal);
+  font-family:"IBM Plex Mono",monospace;font-size:11px;font-weight:600;letter-spacing:.02em;white-space:nowrap}
+.opnext:active{background:var(--signal);border-color:var(--signal);color:var(--surSignal);transform:scale(.96)}
 .op.sup:active{color:var(--rouge);border-color:var(--rougeB)}
 .card.arch{opacity:.5}
 .card.arch .poster{filter:grayscale(1)}
@@ -312,9 +319,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.10.0";
+const VERSION = "1.10.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.10.1", d:"2026-08-24", t:"Bouton d'épisode plus clair", l:[
+    "Le bouton d'enchaînement n'est plus vert : le vert signale ce qui est déjà vu et prêtait à confusion. Il passe à l'orange d'action.",
+    "Il porte le code de l'épisode qu'il va cocher, S01E03, pour savoir exactement sur quoi on appuie.",
+    "Le code n'est plus répété dans la ligne de description, qui affiche maintenant le titre de l'épisode en entier."
+  ]},
   { v:"1.10.0", d:"2026-08-24", t:"Binge et détails", l:[
     "Un bouton vert sur chaque carte de Séries coche le prochain épisode sans ouvrir la fiche : de quoi enchaîner les épisodes d'affilée.",
     "La fiche affiche le statut de diffusion publié : en production, terminée, en développement ou suite indéterminée.",
@@ -950,7 +962,7 @@ function carteSerie(sh){
     : a.total && a.watched === a.total ? "complète" : "à jour";
   const pp = passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "";
   let ligne;
-  if(nx) ligne = pp + '<span class="code next">S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span> ' + esc(nx.t || "");
+  if(nx) ligne = pp + esc(nx.t || "Épisode sans titre");
   else if(up) ligne = pp + 'À jour · retour ' + relDate(up.d);
   else if(a.total && a.watched === a.total) ligne = pp + 'Terminée';
   else ligne = pp + 'À jour';
@@ -965,14 +977,16 @@ function carteSerie(sh){
       '<span>' + a.pct + ' %</span></div>' +
     '</div></button>' +
     '<div class="ops">' +
-      (nx ? '<button class="op vu" data-act="tick-next" data-id="' + sh.id + '" ' +
-        'title="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu" aria-label="Marquer le prochain épisode vu">' +
-        svg("check", 16) + '</button>' : "") +
-      '<button class="op' + (sh.archive ? " on" : "") + '" data-act="archiver" data-id="' + sh.id + '" ' +
-        'title="' + (sh.archive ? "Sortir des archives" : "Archiver") + '" aria-label="' + (sh.archive ? "Sortir des archives" : "Archiver") + '">' +
-        svg("archive", 17) + '</button>' +
-      '<button class="op sup" data-act="supprimer" data-id="' + sh.id + '" title="Retirer de ma liste" aria-label="Retirer de ma liste">' +
-        svg("poubelle", 17) + '</button>' +
+      (nx ? '<button class="opnext" data-act="tick-next" data-id="' + sh.id + '" ' +
+        'title="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu" aria-label="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu">' +
+        svg("check", 14) + '<span>S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span></button>' : "") +
+      '<div class="opsrow">' +
+        '<button class="op' + (sh.archive ? " on" : "") + '" data-act="archiver" data-id="' + sh.id + '" ' +
+          'title="' + (sh.archive ? "Sortir des archives" : "Archiver") + '" aria-label="' + (sh.archive ? "Sortir des archives" : "Archiver") + '">' +
+          svg("archive", 17) + '</button>' +
+        '<button class="op sup" data-act="supprimer" data-id="' + sh.id + '" title="Retirer de ma liste" aria-label="Retirer de ma liste">' +
+          svg("poubelle", 17) + '</button>' +
+      '</div>' +
     '</div></div>';
 }
 
