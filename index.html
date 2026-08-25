@@ -215,6 +215,8 @@ nav.tabs{
 .op[data-act^="favori"]{font-size:15px;line-height:1}
 .ops{gap:6px;align-items:stretch}
 .opsrow{display:flex;gap:6px;justify-content:flex-end}
+.opsrow .opnext{flex:1}
+.op.moins{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600}
 /* Bouton « épisode suivant » : orange d'action, jamais vert — le vert est
    réservé à ce qui est déjà vu, et prêtait à confusion ici. */
 .opnext{display:flex;align-items:center;justify-content:center;gap:5px;height:32px;padding:0 8px;
@@ -395,9 +397,13 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.16.1";
+const VERSION = "1.16.2";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.16.2", d:"2026-08-25", t:"Corriger un visionnage de trop", l:[
+    "Un bouton −1 accompagne le +1 dès qu'un film compte au moins deux visionnages.",
+    "Il disparaît quand il n'en reste qu'un : la liste ne fait qu'avancer, et le tout dernier visionnage se retire depuis la fiche."
+  ]},
   { v:"1.16.1", d:"2026-08-25", t:"Cartes de films resserrées", l:[
     "Les cartes de films adoptent l'ossature des séries : une pastille d'action large, puis l'étoile et la corbeille côte à côte.",
     "Fini la colonne de quatre icônes empilées qui étirait la carte et laissait du vide à droite.",
@@ -1627,9 +1633,13 @@ function carteFilm(f){
         (f.duree ? '<span>' + f.duree + ' min</span>' : "") + '</div>' +
     '</div></button>' +
     '<div class="ops">' +
-      '<button class="opnext" data-act="' + (n ? "again-f" : "tick-f") + '" data-id="' + esc(f.id) + '" ' +
-        'title="' + (n ? "Compter un visionnage de plus" : "Marquer vu") + '" aria-label="' + (n ? "Revu" : "Marquer vu") + '">' +
-        svg("check", 14) + '<span>' + (n ? "+1" : "Vu") + '</span></button>' +
+      '<div class="opsrow">' +
+        '<button class="opnext" data-act="' + (n ? "again-f" : "tick-f") + '" data-id="' + esc(f.id) + '" ' +
+          'title="' + (n ? "Compter un visionnage de plus" : "Marquer vu") + '" aria-label="' + (n ? "Revu" : "Marquer vu") + '">' +
+          svg("check", 14) + '<span>' + (n ? "+1" : "Vu") + '</span></button>' +
+        (n > 1 ? '<button class="op moins" data-act="moins-f" data-id="' + esc(f.id) + '" ' +
+          'title="Retirer le dernier visionnage" aria-label="Retirer un visionnage">−1</button>' : "") +
+      '</div>' +
       '<div class="opsrow">' +
         '<button class="op' + (f.favorite ? " fa" : "") + '" data-act="favori-f" data-id="' + esc(f.id) + '" title="' + (f.favorite ? "Retirer des favoris" : "Mettre en favori") + '" aria-label="Favori">' + (f.favorite ? "★" : "☆") + '</button>' +
         '<button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button>' +
@@ -2489,6 +2499,15 @@ document.addEventListener("click", async ev => {
     const f = DB.films[id]; if(!f) return;
     marquerFilm(f, !nbVuesFilm(f));
     render(); return;
+  }
+  if(act === "moins-f"){
+    const f = DB.films[id]; if(!f) return;
+    const v = vuesFilm(f).slice();
+    if(v.length <= 1) return;   // le dernier visionnage se retire depuis la fiche
+    v.pop(); f.vu = v; f.activite = Date.now(); state.vise = f.id;
+    sauverFilm(f); render();
+    toast("Visionnage retiré · " + v.length + " conservé" + (v.length > 1 ? "s" : ""));
+    return;
   }
   if(act === "again-f"){
     const f = DB.films[id]; if(!f) return;
