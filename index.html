@@ -397,9 +397,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.17.0";
+const VERSION = "1.17.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.17.1", d:"2026-08-25", t:"Correctif du dépliage des années", l:[
+    "Déplier une année ne fige plus l'application : le rendu déclenché à l'ouverture recréait le bloc, ce qui relançait l'ouverture, en boucle.",
+    "Le contenu de chaque année est désormais présent dès l'affichage, comme pour les saisons d'une série.",
+    "Carte d'activité allégée : plus d'infobulle sur les jours sans visionnage."
+  ]},
   { v:"1.17.0", d:"2026-08-25", t:"Rétrospectives empilées", l:[
     "Une rétrospective par année, dépliable : l'année en cours ouverte, les précédentes repliées en dessous.",
     "Chaque année garde sa carte d'activité, son bilan, son palmarès, son mois le plus chargé et sa journée record.",
@@ -1844,13 +1849,11 @@ function carteAnnee(an, jours){
       if(jour.getFullYear() !== +an){ cases.push('<i class="o"></i>'); continue; }
       const k = jour.getFullYear() + "-" + p2(jour.getMonth() + 1) + "-" + p2(jour.getDate());
       const n = jours.get(k) || 0;
-      cases.push('<i class="n' + niveau(n) + '" title="' + frDate(k) + ' — ' +
-        (n ? n + " visionnage" + (n > 1 ? "s" : "") : "rien") + '"></i>');
+      cases.push(n
+        ? '<i class="n' + niveau(n) + '" title="' + frDate(k) + ' — ' + n + ' visionnage' + (n > 1 ? "s" : "") + '"></i>'
+        : '<i></i>');
     }
   }
-  // remise en ordre : la grille se remplit colonne par colonne
-  const ordre = [];
-  for(let j = 0; j < 7; j++) for(let c = 0; c < 53; c++) ordre.push(cases[c * 7 + j]);
   return '<div class="hmx">' + entetes.map(x => '<span>' + x + '</span>').join("") + '</div>' +
     '<div class="hm">' + cases.join("") + '</div>' +
     '<div class="hml"><span>moins</span><i></i><i class="n1"></i><i class="n2"></i><i class="n3"></i><i class="n4"></i><span>plus</span></div>';
@@ -1964,8 +1967,7 @@ function vueStats(){
     const ouvert = ouvertes.has(an);
     const resume = [r.eps ? r.eps + " ép." : "", r.films ? r.films + " films" : "",
                     dureeLongue(r.mins + r.minsF)].filter(Boolean).join(" · ");
-    let dedans = "";
-    if(ouvert){
+    const dedans = (function(){
       const bilan = [
         [r.eps, "épisodes"], [dureeLongue(r.mins + r.minsF), "d\'écran"],
         [r.films, "films"], [r.jours.size, "jours actifs"]
@@ -1979,7 +1981,7 @@ function vueStats(){
       let record = ["", 0];
       r.jours.forEach((v, k) => { if(v > record[1]) record = [k, v]; });
       const meilleurMois = r.parMois.indexOf(Math.max(...r.parMois));
-      dedans = '<div style="padding:12px">' + carteAnnee(an, r.jours) +
+      return '<div style="padding:12px">' + carteAnnee(an, r.jours) +
         '<div class="grid2" style="margin-top:14px">' + bilan + '</div>' +
         (palmares ? '<div class="note" style="margin:14px 0 5px">Les plus regardées</div>' + palmares : "") +
         (r.eps ? '<p class="note" style="margin-top:11px">Mois le plus chargé : <b style="color:var(--papier)">' +
@@ -1987,7 +1989,7 @@ function vueStats(){
           (record[1] > 1 ? ' Journée record : <b style="color:var(--papier)">' + frDate(record[0]) +
             '</b>, ' + record[1] + ' visionnages.' : "") + '</p>' : "") +
         '</div>';
-    }
+    })();
     return '<details class="season" data-an="' + an + '"' + (ouvert ? " open" : "") + '>' +
       '<summary><h3>' + an + '</h3>' +
       '<span class="mono" style="font-size:11px;color:var(--gris)">' + esc(resume) + '</span></summary>' +
@@ -2856,8 +2858,7 @@ document.addEventListener("toggle", ev => {
     const an = ev.target.getAttribute("data-an");
     if(!state.ansOuvertes) state.ansOuvertes = new Set();
     if(ev.target.open) state.ansOuvertes.add(an); else state.ansOuvertes.delete(an);
-    render();
-    return;
+    return;   // surtout pas de rendu ici : il recréerait le bloc et relancerait l'événement
   }
   if(ev.target.hasAttribute && ev.target.hasAttribute("data-saison")){
     const s = Number(ev.target.getAttribute("data-saison"));
