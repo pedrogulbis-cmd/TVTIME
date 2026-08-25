@@ -397,9 +397,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.16.2";
+const VERSION = "1.17.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.17.0", d:"2026-08-25", t:"Rétrospectives empilées", l:[
+    "Une rétrospective par année, dépliable : l'année en cours ouverte, les précédentes repliées en dessous.",
+    "Chaque année garde sa carte d'activité, son bilan, son palmarès, son mois le plus chargé et sa journée record.",
+    "Le résumé de chaque année s'affiche sur la ligne repliée : épisodes, films, temps d'écran.",
+    "Toutes les années sont calculées en un seul parcours des visionnages, au lieu d'un par année.",
+    "Nouvel export CSV des films, et la sauvegarde JSON reprend la clé TMDb, la langue et le pays sur un appareil vierge."
+  ]},
   { v:"1.16.2", d:"2026-08-25", t:"Corriger un visionnage de trop", l:[
     "Un bouton −1 accompagne le +1 dès qu'un film compte au moins deux visionnages.",
     "Il disparaît quand il n'en reste qu'un : la liste ne fait qu'avancer, et le tout dernier visionnage se retire depuis la fiche."
@@ -1044,8 +1051,8 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
-                anStats:"", fAnnee:"", fReste:"", doublons:null, tirage:null,
-                panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"",
+                fAnnee:"", fReste:"", doublons:null, tirage:null,
+                panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -1817,11 +1824,6 @@ function indexEpisodes(){
   Object.values(DB.shows).forEach(sh => (sh.eps || []).forEach(e => m.set(String(e.i), { sh, e })));
   return m;
 }
-function anneesActives(jours){
-  const a = new Set();
-  jours.forEach((v, k) => a.add(k.slice(0, 4)));
-  return [...a].sort((x, y) => y.localeCompare(x));
-}
 const niveau = n => n >= 7 ? 4 : n >= 4 ? 3 : n >= 2 ? 2 : n >= 1 ? 1 : 0;
 
 function carteAnnee(an, jours){
@@ -1854,32 +1856,45 @@ function carteAnnee(an, jours){
     '<div class="hml"><span>moins</span><i></i><i class="n1"></i><i class="n2"></i><i class="n3"></i><i class="n4"></i><span>plus</span></div>';
 }
 
-/* ---------- rétrospective d'une année ---------- */
-function retrospective(an, jours, idx){
-  let eps = 0, mins = 0;
-  const parSerie = new Map(), parMois = new Array(12).fill(0);
+/* ---------- bilan de toutes les années, en un seul parcours ----------
+   La bibliothèque compte des dizaines de milliers de dates : on les traverse
+   une fois en répartissant dans l'année correspondante, plutôt que de
+   recalculer chaque année séparément à chaque affichage. */
+function bilanParAnnee(){
+  const idx = indexEpisodes();
+  const ans = new Map();
+  const obtenir = a => {
+    if(!ans.has(a)) ans.set(a, { eps:0, mins:0, films:0, minsF:0,
+      parSerie:new Map(), parMois:new Array(12).fill(0), jours:new Map() });
+    return ans.get(a);
+  };
   Object.keys(DB.watched).forEach(k => {
-    const v = DB.watched[k]; if(!Array.isArray(v)) return;
-    const ref = idx.get(String(k)); if(!ref) return;
+    const v = DB.watched[k];
+    if(!Array.isArray(v)) return;
+    const ref = idx.get(String(k));
     v.forEach(ts => {
-      if(String(ts).slice(0, 4) !== an) return;
-      eps++;
-      mins += ref.e.r || ref.sh.runtime || 42;
-      parMois[+String(ts).slice(5, 7) - 1]++;
-      parSerie.set(ref.sh.name, (parSerie.get(ref.sh.name) || 0) + 1);
+      const st = String(ts), an = st.slice(0, 4), jour = st.slice(0, 10);
+      if(!/^\d{4}$/.test(an)) return;
+      const o = obtenir(an);
+      o.jours.set(jour, (o.jours.get(jour) || 0) + 1);
+      if(!ref) return;                 // visionnage orphelin : compté au jour, rattaché à aucune série
+      o.eps++;
+      o.mins += ref.e.r || ref.sh.runtime || 42;
+      o.parMois[+st.slice(5, 7) - 1]++;
+      o.parSerie.set(ref.sh.name, (o.parSerie.get(ref.sh.name) || 0) + 1);
     });
   });
-  let films = 0, minsF = 0;
   Object.values(DB.films).forEach(f => (f.vu || []).forEach(ts => {
-    if(String(ts).slice(0, 4) === an){ films++; minsF += f.duree || 100; }
+    const st = String(ts), an = st.slice(0, 4), jour = st.slice(0, 10);
+    if(!/^\d{4}$/.test(an)) return;
+    const o = obtenir(an);
+    o.jours.set(jour, (o.jours.get(jour) || 0) + 1);
+    o.films++;
+    o.minsF += f.duree || 100;
   }));
-  const top = [...parSerie.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
-  const meilleurMois = parMois.indexOf(Math.max(...parMois));
-  let record = ["", 0];
-  jours.forEach((v, k) => { if(k.slice(0, 4) === an && v > record[1]) record = [k, v]; });
-  const nbJours = [...jours.keys()].filter(k => k.slice(0, 4) === an).length;
-  return { eps, mins, films, minsF, top, meilleurMois, parMois, record, nbJours };
+  return ans;
 }
+
 function vueStats(){
   const shows = Object.values(DB.shows);
   if(!shows.length && !Object.keys(DB.films).length)
@@ -1939,36 +1954,45 @@ function vueStats(){
         .map(([x, l]) => '<div class="stat"><div class="n">' + esc(x) + '</div><div class="l">' + l + '</div></div>').join("") +
       '</div>' : "";
 
-  const jours = activiteParJour();
-  const ans = anneesActives(jours);
-  const an = ans.includes(state.anStats) ? state.anStats : (ans[0] || String(new Date().getFullYear()));
-  let blocAnnee = "";
-  if(ans.length){
-    const r = retrospective(an, jours, indexEpisodes());
-    const chipsAns = '<div class="chips" style="margin-top:10px">' + ans.slice(0, 15).map(x =>
-      '<button class="chip ' + (x === an ? "on" : "") + '" data-act="an-stats" data-id="' + x + '">' + x + '</button>').join("") + '</div>';
-    const bilan = [
-      [r.eps, "épisodes"], [dureeLongue(r.mins + r.minsF), "d'écran"],
-      [r.films, "films"], [r.nbJours, "jours actifs"]
-    ].map(([x, l]) => '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + esc(x) +
-      '</div><div class="l">' + l + '</div></div>').join("");
-    const maxS = r.top.length ? r.top[0][1] : 1;
-    const palmares = r.top.map(([nom, n]) => '<div class="bar"><div class="lb">' + esc(nom) + '</div>' +
-      '<div class="tr"><div class="fl" style="width:' + (n / maxS * 100) + '%"></div></div>' +
-      '<div class="vl">' + n + ' ép.</div></div>').join("");
-    blocAnnee = '<div class="eyebrow">Carte d\'activité</div>' + chipsAns +
-      '<div class="box" style="margin-top:9px;overflow:hidden">' + carteAnnee(an, jours) + '</div>' +
-      (r.eps || r.films
-        ? '<div class="eyebrow">Rétrospective ' + an + '</div>' +
-          '<div class="grid2">' + bilan + '</div>' +
-          '<div class="box" style="margin-top:9px">' +
-            (palmares ? '<div class="note" style="margin-bottom:5px">Les plus regardées</div>' + palmares : "") +
-            '<p class="note" style="margin-top:11px">Mois le plus chargé : <b style="color:var(--papier)">' +
-              MOIS[r.meilleurMois] + '</b> avec ' + r.parMois[r.meilleurMois] + ' épisodes.' +
-            (r.record[1] > 1 ? ' Journée record : <b style="color:var(--papier)">' + frDate(r.record[0]) +
-              '</b>, ' + r.record[1] + ' visionnages.' : "") + '</p></div>'
-        : '<div class="box" style="margin-top:9px"><p class="note">Aucun visionnage enregistré en ' + an + '.</p></div>');
-  }
+  const parAn = bilanParAnnee();
+  const ans = [...parAn.keys()].sort((a, b) => b.localeCompare(a));
+  if(ans.length && !state.ansOuvertes) state.ansOuvertes = new Set([ans[0]]);
+  const ouvertes = state.ansOuvertes || new Set();
+
+  const blocAnnee = ans.length ? '<div class="eyebrow">Rétrospective</div><div class="stack">' + ans.map(an => {
+    const r = parAn.get(an);
+    const ouvert = ouvertes.has(an);
+    const resume = [r.eps ? r.eps + " ép." : "", r.films ? r.films + " films" : "",
+                    dureeLongue(r.mins + r.minsF)].filter(Boolean).join(" · ");
+    let dedans = "";
+    if(ouvert){
+      const bilan = [
+        [r.eps, "épisodes"], [dureeLongue(r.mins + r.minsF), "d\'écran"],
+        [r.films, "films"], [r.jours.size, "jours actifs"]
+      ].map(([x, l]) => '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + esc(x) +
+        '</div><div class="l">' + l + '</div></div>').join("");
+      const top = [...r.parSerie.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5);
+      const maxS = top.length ? top[0][1] : 1;
+      const palmares = top.map(([nom, n]) => '<div class="bar"><div class="lb">' + esc(nom) + '</div>' +
+        '<div class="tr"><div class="fl" style="width:' + (n / maxS * 100) + '%"></div></div>' +
+        '<div class="vl">' + n + ' ép.</div></div>').join("");
+      let record = ["", 0];
+      r.jours.forEach((v, k) => { if(v > record[1]) record = [k, v]; });
+      const meilleurMois = r.parMois.indexOf(Math.max(...r.parMois));
+      dedans = '<div style="padding:12px">' + carteAnnee(an, r.jours) +
+        '<div class="grid2" style="margin-top:14px">' + bilan + '</div>' +
+        (palmares ? '<div class="note" style="margin:14px 0 5px">Les plus regardées</div>' + palmares : "") +
+        (r.eps ? '<p class="note" style="margin-top:11px">Mois le plus chargé : <b style="color:var(--papier)">' +
+          MOIS[meilleurMois] + '</b> avec ' + r.parMois[meilleurMois] + ' épisodes.' +
+          (record[1] > 1 ? ' Journée record : <b style="color:var(--papier)">' + frDate(record[0]) +
+            '</b>, ' + record[1] + ' visionnages.' : "") + '</p>' : "") +
+        '</div>';
+    }
+    return '<details class="season" data-an="' + an + '"' + (ouvert ? " open" : "") + '>' +
+      '<summary><h3>' + an + '</h3>' +
+      '<span class="mono" style="font-size:11px;color:var(--gris)">' + esc(resume) + '</span></summary>' +
+      dedans + '</details>';
+  }).join("") + '</div>' : "";
 
   return '<div class="eyebrow">Séries</div><div class="grid2">' + cartes + '</div>' + blocFilms + blocAnnee +
     '<div class="eyebrow">Activité sur 12 mois</div><div class="box">' + spark + '</div>' +
@@ -2220,8 +2244,13 @@ function vueReglages(){
         esc(txt) + (vieux ? " Tes données ne vivent que dans ce navigateur." : "") + '</p>';
     })() +
     '<div class="grid2" style="margin-top:11px">' +
-      '<button class="btn" data-act="export-json">Fichier JSON</button>' +
-      '<button class="btn" data-act="export-csv">Fichier CSV</button></div></div>' +
+      '<button class="btn pri" data-act="export-json">Sauvegarde JSON</button>' +
+      '<button class="btn" data-act="export-csv">Épisodes CSV</button></div>' +
+    '<button class="btn full" style="margin-top:9px" data-act="export-films">Films CSV</button>' +
+    '<p class="note" style="margin-top:11px">Le JSON est la sauvegarde complète : séries, films, chaque visionnage daté, ' +
+    'passages de revisionnage, favoris, archives, plateformes mémorisées et tous tes réglages. ' +
+    'Les deux CSV sont là pour un tableur, pas pour restaurer.</p>' +
+    '<p class="note" style="margin-top:7px;color:var(--signal)">Le JSON contient ta clé TMDb : garde-le pour toi.</p></div>' +
 
   '<div class="box" style="margin-top:9px"><h3>Importer une sauvegarde Antenne</h3>' +
     '<p class="note">Fusionne avec ta liste actuelle. Rien n\'est supprimé.</p>' +
@@ -2461,7 +2490,6 @@ document.addEventListener("click", async ev => {
     DB.settings.tri = id; sauver();   // le choix est retenu d'une session à l'autre
     render(); window.scrollTo(0, 0); return;
   }
-  if(act === "an-stats"){ state.anStats = id; render(); return; }
   if(act === "panneau"){ state.panneau = !state.panneau; render(); return; }
   if(act === "panneau-f"){ state.panneauF = !state.panneauF; render(); return; }
   if(act === "genre-f"){ state.fGenreF = state.fGenreF === id ? "" : id; state.limiteF = PAGE; render(); return; }
@@ -2705,6 +2733,7 @@ document.addEventListener("click", async ev => {
   }
   if(act === "export-json") return exportJSON();
   if(act === "export-csv")  return exportCSV();
+  if(act === "export-films") return exportFilms();
   if(act === "import-list") return importerListe();
   if(act === "voir-doublons"){
     impr.ouvrir("ent");
@@ -2823,6 +2852,13 @@ window.addEventListener("popstate", () => {
 });
 
 document.addEventListener("toggle", ev => {
+  if(ev.target.hasAttribute && ev.target.hasAttribute("data-an")){
+    const an = ev.target.getAttribute("data-an");
+    if(!state.ansOuvertes) state.ansOuvertes = new Set();
+    if(ev.target.open) state.ansOuvertes.add(an); else state.ansOuvertes.delete(an);
+    render();
+    return;
+  }
   if(ev.target.hasAttribute && ev.target.hasAttribute("data-saison")){
     const s = Number(ev.target.getAttribute("data-saison"));
     if(!state.saisons) state.saisons = new Set();
@@ -3475,6 +3511,19 @@ async function importerGenerique(rows, tete){
   majQuota();
 }
 
+function exportFilms(){
+  const l = ['titre,annee,duree_min,genres,statut,favori,archive,visionnages,dates'];
+  Object.values(DB.films).forEach(f => {
+    const v = vuesFilm(f);
+    l.push([f.titre, f.annee || "", f.duree || "", (f.genres || []).join(" / "),
+      v.length ? "vu" : "à voir", f.favorite ? "oui" : "non", f.archive ? "oui" : "non",
+      v.length, v.map(d => String(d).slice(0, 10)).join(" ")]
+      .map(x => '"' + String(x == null ? "" : x).replace(/"/g, '""') + '"').join(","));
+  });
+  telecharger("antenne-v" + VERSION + "-films-" + todayISO() + ".csv", l.join("\n"), "text/csv;charset=utf-8");
+  toast(l.length - 1 + " films exportés");
+}
+
 async function importerListe(){
   const ta = $("#ta-list"); if(!ta) return;
   const noms = ta.value.split("\n").map(s => s.trim()).filter(Boolean);
@@ -3537,6 +3586,11 @@ document.addEventListener("change", ev => {
           const fus = [...new Set([...cur, ...inc])].sort();
           if(fus.length > cur.length){ ne += fus.length - cur.length; DB.watched[k] = fus; }
         });
+        if(d.settings){
+          ["tmdb","langue","pays"].forEach(k => {
+            if(d.settings[k] && !DB.settings[k]) DB.settings[k] = d.settings[k];
+          });
+        }
         Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
         Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
         toutSalir(); render();
