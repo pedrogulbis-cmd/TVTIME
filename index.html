@@ -207,6 +207,11 @@ nav.tabs{
 .ep:first-child{border-top:0}
 .ep .info{font-size:13.5px}
 .ep .t{font-size:13.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.epinfo{flex:1;min-width:0;text-align:left;background:none;border:0;padding:0;color:inherit}
+.epinfo:active{opacity:.6}
+.epres{padding:0 12px 12px 12px;font-size:13px;line-height:1.6;color:var(--gris);
+  border-top:1px solid var(--trait);margin-top:-1px}
+.epres b{color:var(--papier);font-weight:600}
 .ep.done .t{color:var(--gris)}
 .epchk{width:34px;height:34px;border-radius:50%;border:1.5px solid var(--trait);flex:0 0 34px;
   display:grid;place-items:center;color:var(--gris);background:var(--carte2)}
@@ -307,9 +312,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.9.0";
+const VERSION = "1.10.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.10.0", d:"2026-08-24", t:"Binge et détails", l:[
+    "Un bouton vert sur chaque carte de Séries coche le prochain épisode sans ouvrir la fiche : de quoi enchaîner les épisodes d'affilée.",
+    "La fiche affiche le statut de diffusion publié : en production, terminée, en développement ou suite indéterminée.",
+    "Cliquer sur le titre d'un épisode déplie son résumé, récupéré à la demande puis conservé.",
+    "Un bouton ↺ sur l'en-tête de saison compte un visionnage de plus pour toute la saison d'un coup.",
+    "TMDb devient la source unique des films ; le repli iTunes est retiré."
+  ]},
   { v:"1.9.0", d:"2026-08-24", t:"Films", l:[
     "Nouvel onglet Films, bâti sur la même présentation que Séries : recherche, filtres, tris, archivage, corbeille.",
     "Un film garde la liste datée de ses visionnages, avec bouton +1 pour les revoyures.",
@@ -706,6 +718,19 @@ function avancement(sh){
            pct: air.length ? Math.round(w.filter(diffuse).length / air.length * 100) : 0 };
 }
 function prochainAVoir(sh){ return epsOf(sh).find(e => diffuse(e) && !vu(e, sh)) || null; }
+/* TVmaze ne distingue pas « annulée » de « terminée » : les deux sont Ended.
+   On rend donc l'information telle qu'elle est publiée, sans l'inventer. */
+const DIFFUSION = {
+  "Running":            ["En production", "vu"],
+  "To Be Determined":   ["Suite indéterminée", "next"],
+  "In Development":     ["En développement", "next"],
+  "Ended":              ["Terminée", ""]
+};
+function chipDiffusion(sh){
+  const d = DIFFUSION[sh.status];
+  if(!d) return sh.status ? '<span class="code">' + esc(sh.status) + '</span>' : "";
+  return '<span class="code ' + d[1] + '">' + d[0] + '</span>';
+}
 function prochaineDiffusion(sh){ return epsOf(sh).find(e => e.d && e.d > todayISO()) || null; }
 function tempsVu(sh){
   return epsOf(sh).reduce((t, e) => t + nbVues(e) * (e.r || sh.runtime || 42), 0);
@@ -819,7 +844,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series",
+                filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -940,6 +965,9 @@ function carteSerie(sh){
       '<span>' + a.pct + ' %</span></div>' +
     '</div></button>' +
     '<div class="ops">' +
+      (nx ? '<button class="op vu" data-act="tick-next" data-id="' + sh.id + '" ' +
+        'title="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu" aria-label="Marquer le prochain épisode vu">' +
+        svg("check", 16) + '</button>' : "") +
       '<button class="op' + (sh.archive ? " on" : "") + '" data-act="archiver" data-id="' + sh.id + '" ' +
         'title="' + (sh.archive ? "Sortir des archives" : "Archiver") + '" aria-label="' + (sh.archive ? "Sortir des archives" : "Archiver") + '">' +
         svg("archive", 17) + '</button>' +
@@ -1065,10 +1093,8 @@ function vueListe(){
 
 /* ============================================================
    FILMS
-   Deux sources possibles :
-   — iTunes Search, sans clé ni compte, active d'emblée ;
-   — TMDb, si une clé est renseignée dans les Réglages : catalogue
-     bien plus complet, notamment pour les films anciens ou peu diffusés.
+   Source : TMDb. Une clé API gratuite est nécessaire, à renseigner dans
+   les Réglages ; elle ne quitte pas ce navigateur.
    Un film garde la liste datée de ses visionnages, comme un épisode.
    ============================================================ */
 async function jsonLibre(url){
@@ -1078,18 +1104,6 @@ async function jsonLibre(url){
 }
 const cleTMDB = () => (DB.settings && DB.settings.tmdb || "").trim();
 
-function normFilmITunes(x){
-  return {
-    id:"itunes:" + x.trackId,
-    titre:x.trackName || "Sans titre",
-    annee:x.releaseDate ? String(x.releaseDate).slice(0, 4) : "",
-    affiche:x.artworkUrl100 ? String(x.artworkUrl100).replace(/100x100/, "300x300") : null,
-    duree:x.trackTimeMillis ? Math.round(x.trackTimeMillis / 60000) : null,
-    genres:x.primaryGenreName ? [x.primaryGenreName] : [],
-    resume:x.longDescription || x.shortDescription || "",
-    realisateur:x.artistName || ""
-  };
-}
 function normFilmTMDB(x){
   return {
     id:"tmdb:" + x.id,
@@ -1104,18 +1118,15 @@ function normFilmTMDB(x){
 }
 async function chercherFilms(q){
   const cle = cleTMDB();
-  if(cle){
-    const d = await jsonLibre("https://api.themoviedb.org/3/search/movie?api_key=" + encodeURIComponent(cle) +
-      "&language=fr-FR&include_adult=false&query=" + encodeURIComponent(q));
-    return (d.results || []).slice(0, 20).map(normFilmTMDB);
-  }
-  const d = await jsonLibre("https://itunes.apple.com/search?media=movie&country=FR&limit=20&term=" + encodeURIComponent(q));
-  return (d.results || []).map(normFilmITunes);
+  if(!cle) throw new Error("clé TMDb absente");
+  const d = await jsonLibre("https://api.themoviedb.org/3/search/movie?api_key=" + encodeURIComponent(cle) +
+    "&language=fr-FR&include_adult=false&query=" + encodeURIComponent(q));
+  return (d.results || []).slice(0, 20).map(normFilmTMDB);
 }
 /* La recherche TMDb ne renvoie ni durée ni genres : on complète à l'ajout. */
 async function completerFilm(f){
   const cle = cleTMDB();
-  if(!cle || !/^tmdb:/.test(f.id) || f.duree) return f;
+  if(!cle || f.duree) return f;
   try{
     const d = await jsonLibre("https://api.themoviedb.org/3/movie/" + f.id.slice(5) +
       "?api_key=" + encodeURIComponent(cle) + "&language=fr-FR");
@@ -1166,9 +1177,13 @@ const FILTRES_F = [
 function vueFilms(){
   const tout = Object.values(DB.films);
   if(!tout.length)
-    return '<div class="empty" style="padding-top:64px"><h3>Aucun film</h3>' +
-      '<p>Cherche un film, ajoute-le, coche-le quand tu l\'as vu.</p>' +
-      '<button class="btn pri" data-act="go-search">Chercher un film</button></div>';
+    return cleTMDB()
+      ? '<div class="empty" style="padding-top:64px"><h3>Aucun film</h3>' +
+        '<p>Cherche un film, ajoute-le, coche-le quand tu l\'as vu.</p>' +
+        '<button class="btn pri" data-act="go-search">Chercher un film</button></div>'
+      : '<div class="empty" style="padding-top:64px"><h3>Clé TMDb requise</h3>' +
+        '<p>La recherche de films passe par TMDb. Une clé gratuite suffit,<br>à coller dans les Réglages.</p>' +
+        '<button class="btn pri" data-act="tab" data-id="reglages">Aller aux Réglages</button></div>';
 
   let l = tout;
   const f = state.filtreF;
@@ -1437,9 +1452,10 @@ function vueRechercheFilms(){
     '<div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
     '<input id="q" type="search" placeholder="Titre du film…" autocomplete="off" value="' + esc(state.q) + '">' +
     '<button class="btn sm" data-act="close-search">Fermer</button></div>' +
-    (state.resF.length ? '<div class="eyebrow">Résultats <b>' + state.resF.length + '</b></div><div class="stack">' + res + '</div>'
-      : state.q.length > 1 ? '<div class="empty"><p>Aucun film trouvé.' +
-          (cleTMDB() ? "" : " Le catalogue iTunes couvre mal les films anciens ou confidentiels — une clé TMDb dans les Réglages élargit beaucoup la recherche.") + '</p></div>'
+    (!cleTMDB() ? '<div class="empty"><h3>Clé TMDb requise</h3><p>Colle une clé gratuite dans les Réglages pour chercher des films.</p>' +
+        '<button class="btn pri" data-act="tab" data-id="reglages">Aller aux Réglages</button></div>'
+      : state.resF.length ? '<div class="eyebrow">Résultats <b>' + state.resF.length + '</b></div><div class="stack">' + res + '</div>'
+      : state.q.length > 1 ? '<div class="empty"><p>Aucun film trouvé sous ce titre.</p></div>'
       : '<div class="empty"><p>Tape un titre pour chercher un film.</p></div>');
 }
 
@@ -1460,6 +1476,8 @@ function vueFiche(sh){
     return '<details class="season" data-saison="' + s + '" ' + (ouvertes.has(s) ? "open" : "") + '>' +
       '<summary><h3>' + (s === 0 ? "Spéciaux" : "Saison " + s) + '</h3>' +
       '<span class="mono" style="font-size:11px;color:var(--gris)">' + w + '/' + eps.length + '</span>' +
+      (w ? '<span class="btn sm" data-act="season-revoir" data-id="' + sh.id + '" data-s="' + s + '" ' +
+        'title="Compter un visionnage de plus pour toute la saison">↺</span>' : "") +
       '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
       (tous ? "Tout décocher" : "Tout cocher") + '</span></summary>' +
       eps.map(e => {
@@ -1467,15 +1485,20 @@ function vueFiche(sh){
         const der = nv ? vues(e)[nv - 1] : null;
         return '<div class="ep ' + (w2 ? "done" : "") + '">' +
           '<span class="code ' + (w2 ? "vu" : "") + '" style="flex:0 0 auto">S' + p2(e.s) + 'E' + p2(e.n || 0) + '</span>' +
-          '<div class="info" style="min-width:0"><div class="t">' + esc(e.t || "Épisode") + '</div>' +
+          '<button class="epinfo" data-act="ep-info" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Voir le résumé">' +
+          '<div class="t">' + esc(e.t || "Épisode") + '</div>' +
           '<div class="mono" style="font-size:10.5px;color:var(--gris)">' +
           (der ? "vu le " + frDate(String(der).slice(0, 10)) : (e.d ? frDate(e.d) : "date inconnue")) +
-          (e.r ? " · " + e.r + " min" : "") + '</div></div>' +
+          (e.r ? " · " + e.r + " min" : "") + '</div></button>' +
           (nv > 1 ? '<span class="xn" title="' + nv + ' visionnages">&times;' + nv + '</span>' : "") +
           (w2 ? '<button class="plus1" data-act="again" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Compter un visionnage de plus" aria-label="Compter un visionnage de plus">+1</button>'
               : (diffuse(e) ? '<button class="upto" data-act="upto" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Marquer vu jusqu\'ici" aria-label="Marquer vu jusqu\'ici">' + svg("down", 15) + '</button>' : "")) +
           '<button class="epchk ' + (w2 ? "on" : "") + '" data-act="tick" data-id="' + sh.id + '" data-ep="' + e.i + '" aria-label="Marquer vu">' + svg("check", 17) + '</button>' +
-          '</div>';
+          '</div>' +
+          (state.epOuvert === e.i
+            ? '<div class="epres">' + (e.x === undefined ? "Chargement du résumé…"
+                : e.x ? esc(e.x) : "Aucun résumé publié pour cet épisode.") + '</div>'
+            : "");
       }).join("") + '</details>';
   }).join("");
 
@@ -1485,10 +1508,12 @@ function vueFiche(sh){
       '<button class="btn sm" data-act="refresh-one" data-id="' + sh.id + '">Actualiser</button></div>' +
     '<div class="hero"><div class="row">' + affiche(sh, "lg") +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(sh.name) + '</h2>' +
-      '<div class="sub" style="-webkit-line-clamp:3;margin-top:6px">' +
-        [sh.premiered ? sh.premiered.slice(0, 4) + (sh.ended ? "–" + sh.ended.slice(0, 4) : sh.status === "Running" ? "–" : "") : "",
-         sh.network, sh.runtime ? sh.runtime + " min" : "", (sh.genres || []).slice(0, 3).join(", ")]
-        .filter(Boolean).map(esc).join(" · ") + '</div>' +
+      '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' + chipDiffusion(sh) +
+        (sh.premiered ? '<span class="code">' + esc(sh.premiered.slice(0, 4) +
+          (sh.ended ? "–" + sh.ended.slice(0, 4) : sh.status === "Running" ? "–" : "")) + '</span>' : "") +
+        (sh.network ? '<span class="code">' + esc(sh.network) + '</span>' : "") +
+        (sh.runtime ? '<span class="code">' + sh.runtime + ' min</span>' : "") + '</div>' +
+      '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc((sh.genres || []).join(", ")) + '</div>' +
       bande(sh) +
       '<div class="stripmeta"><span>' + a.watched + '/' + a.total + ' épisodes</span>' +
       (tempsRestant(sh) ? '<span style="color:var(--signal)">reste ' + dureeLongue(tempsRestant(sh)) + '</span>' : "") +
@@ -1592,12 +1617,12 @@ function vueReglages(){
 
   '<div class="eyebrow">Source des films</div>' +
   '<div class="box"><h3>Clé TMDb</h3>' +
-    '<p class="note">Sans clé, la recherche de films passe par le catalogue iTunes : rien à configurer, mais la couverture des films anciens ou confidentiels est inégale, et les résumés sont parfois absents.</p>' +
-    '<p class="note" style="margin-top:7px">Une clé TMDb gratuite (themoviedb.org, section API de ton compte) donne un catalogue nettement plus complet, en français, avec affiches et synopsis. Elle reste dans ce navigateur.</p>' +
+    '<p class="note">La recherche de films passe par TMDb. La clé est gratuite : compte sur themoviedb.org, puis Paramètres → API. ' +
+    'Elle reste dans ce navigateur et n\'est envoyée qu\'à TMDb.</p>' +
     '<div class="search" style="margin-top:11px"><input id="cle-tmdb" type="text" placeholder="Clé API TMDb (facultatif)" ' +
       'autocomplete="off" spellcheck="false" value="' + esc(DB.settings.tmdb || "") + '"></div>' +
     '<div class="mono" style="font-size:11px;color:' + (cleTMDB() ? "var(--vu)" : "var(--gris)") + ';margin-top:8px">' +
-      (cleTMDB() ? "Source active : TMDb" : "Source active : iTunes") + '</div></div>' +
+      (cleTMDB() ? "Clé enregistrée — recherche de films active" : "Aucune clé : la recherche de films est désactivée") + '</div></div>' +
 
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
@@ -1759,6 +1784,51 @@ document.addEventListener("click", async ev => {
     render();
     return;
   }
+  if(act === "ep-info"){
+    ev.preventDefault();
+    const shId = +id, epId = +el.dataset.ep;
+    if(state.epOuvert === epId){ state.epOuvert = null; render(); return; }
+    state.epOuvert = epId;
+    const sh = DB.shows[shId];
+    const ep = sh && (sh.eps || []).find(x => x.i === epId);
+    render();
+    // Les résumés ne sont pas stockés d'avance : on va chercher celui qu'on
+    // ouvre, une seule fois, puis il reste avec l'épisode.
+    if(ep && ep.x === undefined){
+      try{
+        const d = await net.get(API + "/episodes/" + epId);
+        ep.x = d && d.summary ? strip(d.summary) : "";
+      }catch(e){ ep.x = ""; }
+      sauverShow(sh);
+      if(state.epOuvert === epId) render();
+    }
+    return;
+  }
+  if(act === "season-revoir"){
+    ev.preventDefault();
+    const sh = DB.shows[+id]; if(!sh) return;
+    const s2 = +el.dataset.s;
+    const cibles = epsOf(sh).filter(e => e.s === s2 && diffuse(e) && nbVues(e) > 0);
+    if(!cibles.length) return toast("Aucun épisode vu dans cette saison");
+    cibles.forEach(revoirEpisode);
+    toucher(sh); sauverShow(sh);
+    if(!state.saisons) state.saisons = new Set();
+    state.saisons.add(s2); render();
+    toast(cibles.length + " épisodes comptés une fois de plus");
+    return;
+  }
+  if(act === "tick-next"){
+    const sh = DB.shows[+id]; if(!sh) return;
+    const ep = prochainAVoir(sh);
+    if(!ep) return toast("Aucun épisode en attente");
+    marquer(ep, sh, true);
+    toucher(sh); autoStatut(sh); sauverShow(sh);
+    render(); viser();
+    const suiv = prochainAVoir(sh);
+    toast("S" + p2(ep.s) + "E" + p2(ep.n || 0) + " vu" +
+      (suiv ? " · au suivant : S" + p2(suiv.s) + "E" + p2(suiv.n || 0) : " · série à jour"));
+    return;
+  }
   if(act === "season"){
     ev.preventDefault();
     const sh = DB.shows[+id]; const s = +el.dataset.s, on = el.dataset.on === "1";
@@ -1866,6 +1936,7 @@ function ouvrirFicheFilm(id){
 }
 function ouvrirFiche(id){
   state.retour = window.scrollY;
+  state.epOuvert = null;
   state.detail = id; state.animer = true;
   if(DB.shows[id]) saisonCourante(DB.shows[id]);
   history.pushState({ fiche:id }, "", "#s" + id);
@@ -1900,7 +1971,7 @@ document.addEventListener("input", ev => {
   if(ev.target.id !== "cle-tmdb") return;
   const v = ev.target.value.trim();
   clearTimeout(_cle);
-  _cle = setTimeout(() => { DB.settings.tmdb = v; sauver(); toast(v ? "Source des films : TMDb" : "Source des films : iTunes"); }, 600);
+  _cle = setTimeout(() => { DB.settings.tmdb = v; sauver(); toast(v ? "Clé TMDb enregistrée" : "Clé retirée"); }, 600);
 });
 
 let _qlf;
@@ -1938,8 +2009,9 @@ document.addEventListener("input", ev => {
     const q = state.q.trim();
     if(q.length < 2){ state.res = []; state.resF = []; return majResultats(); }
     if(state.cibleRecherche === "films"){
+      if(!cleTMDB()){ state.resF = []; return majResultats(); }
       try{ state.resF = await chercherFilms(q); }
-      catch(e){ toast("Recherche de films indisponible" + (cleTMDB() ? " — vérifie ta clé TMDb" : "")); state.resF = []; }
+      catch(e){ toast("Recherche indisponible — vérifie ta clé TMDb"); state.resF = []; }
       return majResultats();
     }
     try{
