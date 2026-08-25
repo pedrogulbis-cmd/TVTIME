@@ -331,9 +331,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.10.2";
+const VERSION = "1.11.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.11.0", d:"2026-08-25", t:"Films BetaSeries", l:[
+    "Le fichier films-*.csv de l'export BetaSeries est repris : titres, statut vu ou à voir, et date de visionnage.",
+    "Les titres en écriture d'origine sont retrouvés par TMDb, qui les indexe.",
+    "Le journal signale les titres retenus qui diffèrent de ceux de BetaSeries, pour vérifier d'un coup d'œil.",
+    "Sans clé TMDb, les films sont ignorés avec un message explicite et les séries s'importent quand même."
+  ]},
   { v:"1.10.2", d:"2026-08-24", t:"État de diffusion dans la liste", l:[
     "Chaque carte de Séries porte une pastille En cours, Terminée, En dev ou À confirmer.",
     "Point plein pour une série qui continue, point creux pour une série terminée.",
@@ -1629,9 +1635,10 @@ function vueReglages(){
   '<div class="eyebrow">Reprendre BetaSeries</div>' +
   '<div class="box"><h3>Importer l\'export BetaSeries</h3>' +
     '<p class="note">Depuis BetaSeries : Membre → Préférences → Exporter mes données. ' +
-    'Dépose le <b>.zip</b>, ou sélectionne les deux CSV ensemble : ' +
+    'Dépose le <b>.zip</b>, ou sélectionne les CSV ensemble : ' +
     '<span class="mono">series-*.csv</span> pour la liste et l\'archivage, ' +
-    '<span class="mono">episodes-*.csv</span> pour les épisodes vus et leurs dates.</p>' +
+    '<span class="mono">episodes-*.csv</span> pour les épisodes vus et leurs dates, ' +
+    '<span class="mono">films-*.csv</span> pour les films. Les films demandent une clé TMDb ; sans elle, ils sont ignorés et le reste passe normalement.</p>' +
     '<p class="note" style="margin-top:7px">Cet export ne contient pas d\'identifiant TVDB : la correspondance se fait sur le titre, ' +
     'avec plusieurs tentatives dont le titre sans son année. Les séries introuvables sont listées à la fin. ' +
     'Il ne contient pas non plus les revisionnages — chaque épisode y figure une seule fois.</p>' +
@@ -2336,6 +2343,8 @@ async function importerTVTime(rows, tete){
    ============================================================ */
 const estBSseries  = t => t.includes("title") && t.includes("archive") && t.includes("remaining");
 const estBSepisode = t => t.includes("show") && t.includes("episode") && t.includes("date");
+const estBSfilms   = t => t.includes("title") && t.includes("status") && t.includes("date") &&
+                          !t.includes("show") && !t.includes("archive") && !t.includes("episode");
 const lireSE = v => {
   const m = /^S(\d+)E(\d+)$/i.exec(String(v || "").trim());
   if(!m) return null;
@@ -2356,19 +2365,22 @@ async function importerBS(fichiers){
         csvs.push({ nom:f.name, txt:await f.text() });
       }
     }
-    let rSeries = null, rEpisodes = null;
+    let rSeries = null, rEpisodes = null, rFilms = null;
     for(const c of csvs){
       const rows = parseCSV(c.txt);
       if(rows.length < 2) continue;
       const tete = rows[0].map(h => h.toLowerCase().trim());
       if(estBSseries(tete))       { rSeries = { rows, tete };   impr.dire("Séries : " + c.nom + " (" + (rows.length - 1) + " lignes)"); }
       else if(estBSepisode(tete)) { rEpisodes = { rows, tete }; impr.dire("Épisodes : " + c.nom + " (" + (rows.length - 1) + " lignes)"); }
+      else if(estBSfilms(tete))   { rFilms = { rows, tete };    impr.dire("Films : " + c.nom + " (" + (rows.length - 1) + " lignes)"); }
     }
-    if(!rSeries && !rEpisodes){
-      impr.dire("Aucun fichier BetaSeries reconnu. Attendu : series-*.csv et episodes-*.csv.");
+    if(!rSeries && !rEpisodes && !rFilms){
+      impr.dire("Aucun fichier BetaSeries reconnu. Attendu : series-*.csv, episodes-*.csv, films-*.csv.");
       return impr.fermer();
     }
-    return importerBetaSeries(rSeries, rEpisodes);
+    if(rSeries || rEpisodes) await importerBetaSeries(rSeries, rEpisodes, !!rFilms);
+    if(rFilms) await importerFilmsBS(rFilms);
+    impr.fermer(); majQuota();
   }catch(e){
     impr.dire("Échec : " + (e && e.message || e));
     impr.fermer();
@@ -2391,7 +2403,7 @@ async function trouverParTitre(titre){
   return null;
 }
 
-async function importerBetaSeries(rSeries, rEpisodes){
+async function importerBetaSeries(rSeries, rEpisodes, encore){
   const series = new Map();   // titre → { titre, archive, dernier }
   const vusPar = new Map();   // titre → Map("s-n" → date)
 
@@ -2474,9 +2486,59 @@ async function importerBetaSeries(rSeries, rEpisodes){
   impr.dire("\nTerminé : " + ok + " séries, " + coches + " épisodes, " + arch + " archivées" +
     (deduits ? ", " + deduits + " déduites du dernier épisode" : "") + "." +
     (rates.length ? "\nNon retrouvées (" + rates.length + ") : " + rates.slice(0, 25).join(", ") + (rates.length > 25 ? "…" : "") : ""));
-  impr.fermer();
   toast(ok + " séries importées");
-  majQuota();
+  if(!encore){ impr.fermer(); majQuota(); }
+}
+
+/* ---------- films BetaSeries ----------
+   films-*.csv : id, title, status (1 = vu, 0 = à voir), date.
+   L'identifiant est propre à BetaSeries : la correspondance passe par le
+   titre, y compris en écriture d'origine (狼图腾, 부산행), que TMDb indexe. */
+async function importerFilmsBS(rF){
+  const c = k => rF.tete.indexOf(k);
+  const iT = c("title"), iS = c("status"), iD = c("date");
+  const films = rF.rows.slice(1).map(r => ({
+    titre:String(r[iT] || "").trim(),
+    vu:String(r[iS]).trim() === "1",
+    date:r[iD] || null
+  })).filter(x => x.titre);
+  if(!films.length) return;
+
+  if(!cleTMDB()){
+    impr.dire("\n" + films.length + " films repérés, mais aucune clé TMDb n'est renseignée.");
+    impr.dire("Ajoute la clé dans les Réglages, puis relance cet import : les séries déjà reprises ne seront pas dupliquées.");
+    return;
+  }
+
+  impr.dire("\n" + films.length + " films à reprendre.");
+  let ok = 0, vus = 0; const rates = []; let i = 0;
+  for(const f of films){
+    if(state.annuler){ impr.dire("\nInterrompu."); break; }
+    i++; impr.avance(i, films.length, (films.length - i) * 0.5);
+    try{
+      const res = await chercherFilms(f.titre);
+      const m = res.find(x => norm(x.titre) === norm(f.titre)) || res[0];
+      if(!m){ rates.push(f.titre); impr.dire("✗ " + f.titre); continue; }
+      const plein = await completerFilm(m);
+      const fi = ajouterFilm(plein, f.vu ? "watched" : "planned");
+      if(f.vu && !nbVuesFilm(fi)){
+        const d = f.date && !isNaN(new Date(f.date)) ? new Date(f.date).toISOString() : new Date().toISOString();
+        fi.vu = [d]; fi.statut = "watched"; sauverFilm(fi);
+        vus++;
+      }
+      ok++;
+      impr.dire("✓ " + fi.titre + (fi.annee ? " (" + fi.annee + ")" : "") +
+        (f.vu ? "  vu" + (f.date ? " le " + f.date : "") : "  à voir") +
+        (norm(fi.titre) !== norm(f.titre) ? "   ← " + f.titre : ""));
+      await sleep(150);
+    }catch(e){
+      rates.push(f.titre);
+      impr.dire("✗ " + f.titre + " (" + (e && e.message || e) + ")");
+    }
+  }
+  impr.dire("\nFilms : " + ok + " repris, dont " + vus + " déjà vus." +
+    (rates.length ? "\nNon trouvés (" + rates.length + ") : " + rates.join(", ") : ""));
+  toast(ok + " films importés");
 }
 
 /* ---------- CSV d'origine quelconque ---------- */
