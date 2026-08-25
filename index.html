@@ -397,9 +397,12 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.19.0";
+const VERSION = "1.19.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.19.1", d:"2026-08-25", t:"Filtres de l'Agenda enfin visibles", l:[
+    "Les rangées de période et de filtres n'apparaissaient pas : l'ancienne version de l'Agenda était restée dans le fichier et prenait le pas sur la nouvelle."
+  ]},
   { v:"1.19.0", d:"2026-08-25", t:"Agenda filtrable", l:[
     "Filtre de période : 7 jours, 30 jours, 3 mois, ou tout. L'affichage par défaut ne change pas.",
     "Trois filtres : favoris, reprises de saison, et séries dont tu es à jour.",
@@ -1901,41 +1904,7 @@ function vueAgenda(){
 }
 
 /* ---------- vue : Agenda ---------- */
-function vueAgenda(){
-  const out = [];
-  Object.values(DB.shows).forEach(sh => {
-    if(sh.userStatus === "dropped" || sh.archive) return;
-    epsOf(sh).forEach(e => { if(e.d && e.d >= todayISO()) out.push({ sh, e }); });
-  });
-  out.sort((a, b) => a.e.d.localeCompare(b.e.d) || a.sh.name.localeCompare(b.sh.name));
-  if(!out.length) return '<div class="empty" style="padding-top:60px"><h3>Rien de programmé</h3>' +
-    '<p>Aucune date de diffusion connue pour tes séries.</p></div>';
 
-  const t = todayISO();
-  const dans = j => { const d = new Date(t + "T12:00:00"); d.setDate(d.getDate() + j);
-    return d.getFullYear() + "-" + p2(d.getMonth()+1) + "-" + p2(d.getDate()); };
-  const s7 = dans(7), s30 = dans(31);
-  const groupes = [
-    ["Cette semaine", out.filter(x => x.e.d < s7)],
-    ["Ce mois-ci",    out.filter(x => x.e.d >= s7 && x.e.d < s30)],
-    ["Plus tard",     out.filter(x => x.e.d >= s30).slice(0, 60)]
-  ];
-  return groupes.filter(g => g[1].length).map(([titre, arr]) => {
-    let jour = "";
-    const lignes = arr.map(x => {
-      let h = "";
-      if(x.e.d !== jour){ jour = x.e.d;
-        h = '<div class="eyebrow" style="margin:14px 0 8px">' + (x.e.d === t ? "Aujourd'hui · " : "") + frDate(x.e.d) + '</div>'; }
-      const cr = compteRebours(x.e);
-      return h + '<button class="card row" data-act="open" data-id="' + x.sh.id + '">' + affiche(x.sh) +
-        '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(x.sh.name) + '</div>' +
-        '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px"><span class="code">S' + p2(x.e.s) + 'E' + p2(x.e.n || 0) + '</span>' +
-        (cr ? '<span class="code ' + (cr.precis ? "next" : "") + '">' + esc(cr.txt) + '</span>' : "") + '</div>' +
-        '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(x.e.t || "Épisode") + '</div></div></button>';
-    }).join("");
-    return '<div class="eyebrow">' + titre + ' <b>' + arr.length + '</b></div><div class="stack">' + lignes + '</div>';
-  }).join("");
-}
 
 /* ---------- activité datée ----------
    Tous les visionnages, épisodes et films confondus, regroupés par jour.
