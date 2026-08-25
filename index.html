@@ -173,6 +173,10 @@ nav.tabs{
 .strip i.p{background:linear-gradient(180deg,var(--vu) 0 50%,var(--bAir) 50% 100%)} /* partiel */
 .strip i.r{background:var(--bRev)}             /* vu lors d'un passage précédent */
 .strip i.f{background:var(--bFut)}             /* à venir */
+/* Un film n'a pas de progression : une encoche par visionnage, à gauche,
+   plutôt qu'une barre pleine largeur qui laisserait croire à un avancement. */
+.strip.pt{gap:3px}
+.strip.pt i{flex:0 0 17px;min-width:17px;border-radius:2px}
 .stripmeta{display:flex;flex-wrap:wrap;justify-content:space-between;gap:2px 9px;margin-top:6px;
   font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);letter-spacing:.03em}
 
@@ -391,9 +395,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.16.0";
+const VERSION = "1.16.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.16.1", d:"2026-08-25", t:"Cartes de films resserrées", l:[
+    "Les cartes de films adoptent l'ossature des séries : une pastille d'action large, puis l'étoile et la corbeille côte à côte.",
+    "Fini la colonne de quatre icônes empilées qui étirait la carte et laissait du vide à droite.",
+    "La barre de visionnage devient une encoche par fois vue, alignée à gauche, au lieu d'une barre pleine largeur qui suggérait à tort une progression.",
+    "Retirer un visionnage se fait depuis la fiche ; la pastille de la liste ne fait qu'avancer, comme celle des séries."
+  ]},
   { v:"1.16.0", d:"2026-08-25", t:"Correctifs bureau et filtres films", l:[
     "Les rangées de filtres et d'années se font glisser à la souris, et défilent à la molette. Elles ne réagissaient qu'au doigt.",
     "Un déplacement n'est plus interprété comme un clic sur la puce survolée.",
@@ -1609,18 +1619,21 @@ function carteFilm(f){
       afficheFilm(f) +
       '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
       '<div class="sub">' + esc(meta) + '</div>' +
-      '<div class="strip" aria-hidden="true">' +
-        (n ? Array.from({ length:Math.min(n, 12) }, () => '<i class="w"></i>').join("") : '<i class="f"></i>') +
+      '<div class="strip pt" aria-hidden="true">' +
+        (n ? Array.from({ length:Math.min(n, 10) }, () => '<i class="w"></i>').join("") : '<i class="f"></i>') +
       '</div>' +
       '<div class="stripmeta"><span>' + (der ? "vu le " + frDate(der) : "pas encore vu") + '</span>' +
         (n > 1 ? '<span style="color:var(--vu)">↺' + n + '</span>' : "") +
         (f.duree ? '<span>' + f.duree + ' min</span>' : "") + '</div>' +
     '</div></button>' +
     '<div class="ops">' +
-      '<button class="op' + (n ? " vu" : "") + '" data-act="tick-f" data-id="' + esc(f.id) + '" title="' + (n ? "Retirer le dernier visionnage" : "Marquer vu") + '" aria-label="Marquer vu">' + svg("check", 16) + '</button>' +
-      (n ? '<button class="op" data-act="again-f" data-id="' + esc(f.id) + '" title="Compter un visionnage de plus" aria-label="Revu"><span class="mono" style="font-size:11px;font-weight:600">+1</span></button>' : "") +
-      '<button class="op' + (f.favorite ? " fa" : "") + '" data-act="favori-f" data-id="' + esc(f.id) + '" title="' + (f.favorite ? "Retirer des favoris" : "Mettre en favori") + '" aria-label="Favori">' + (f.favorite ? "★" : "☆") + '</button>' +
-      '<button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button>' +
+      '<button class="opnext" data-act="' + (n ? "again-f" : "tick-f") + '" data-id="' + esc(f.id) + '" ' +
+        'title="' + (n ? "Compter un visionnage de plus" : "Marquer vu") + '" aria-label="' + (n ? "Revu" : "Marquer vu") + '">' +
+        svg("check", 14) + '<span>' + (n ? "+1" : "Vu") + '</span></button>' +
+      '<div class="opsrow">' +
+        '<button class="op' + (f.favorite ? " fa" : "") + '" data-act="favori-f" data-id="' + esc(f.id) + '" title="' + (f.favorite ? "Retirer des favoris" : "Mettre en favori") + '" aria-label="Favori">' + (f.favorite ? "★" : "☆") + '</button>' +
+        '<button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button>' +
+      '</div>' +
     '</div></div>';
 }
 
