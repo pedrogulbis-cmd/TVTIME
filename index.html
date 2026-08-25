@@ -323,7 +323,8 @@ nav.tabs{
   background:var(--papier);color:var(--encre);padding:10px 16px;border-radius:10px;font-size:13.5px;
   font-weight:600;z-index:90;opacity:0;transition:.24s;max-width:88vw;text-align:center;pointer-events:none;
   display:flex;align-items:center;gap:12px;justify-content:center}
-.toast.agir{pointer-events:auto;padding-right:8px}
+.toast.on.agir{pointer-events:auto}
+.toast.agir{padding-right:8px}
 .toast-act{background:var(--encre);color:var(--papier);border-radius:7px;padding:6px 11px;
   font-size:12.5px;font-weight:600;white-space:nowrap}
 .toast-act:active{opacity:.75}
@@ -405,9 +406,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.21.0";
+const VERSION = "1.21.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.21.1", d:"2026-08-25", t:"L'application ne se bloque plus après un message", l:[
+    "Les messages porteurs d'un bouton « Annuler » restaient capteurs de clics après avoir disparu : invisibles, ils se plaçaient juste au-dessus de la barre d'onglets et interceptaient chaque tap. Toute la navigation semblait figée jusqu'au rechargement.",
+    "Le défaut touchait les trois messages avec bouton : suppression, rattrapage et lancement d'un revisionnage.",
+    "Le bandeau s'intitule désormais « Jamais vus, derrière ton revisionnage » : il attrape aussi les épisodes jamais vus avant le revisionnage, pas seulement ceux sortis depuis."
+  ]},
   { v:"1.21.0", d:"2026-08-25", t:"Épisodes sortis pendant un revisionnage", l:[
     "Un bandeau en tête de Séries signale les épisodes jamais vus qui attendent derrière une file de revisionnage.",
     "Chaque ligne porte sa pastille pour cocher l'inédit sans quitter la liste.",
@@ -685,9 +691,9 @@ function toast(msg, action){
   t.classList.toggle("agir", !!action);
   t.classList.add("on");
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => t.classList.remove("on"), action ? 6500 : 2400);
+  toast._t = setTimeout(() => { t.classList.remove("on", "agir"); }, action ? 6500 : 2400);
 }
-function fermerToast(){ const t = $("#toast"); if(t) t.classList.remove("on"); clearTimeout(toast._t); }
+function fermerToast(){ const t = $("#toast"); if(t) t.classList.remove("on", "agir"); clearTimeout(toast._t); }
 
 /* Ce qu'on vient de supprimer, gardé le temps d'un éventuel remords. */
 let corbeille = null;
@@ -1347,7 +1353,7 @@ function vueListe(){
     const inédites = seriesInedites();
     if(!inédites.length) return "";
     return '<div class="bandeau">' +
-      '<div class="eyebrow" style="margin:0 0 6px">Sorti pendant ton revisionnage <b>' + inédites.length + '</b></div>' +
+      '<div class="eyebrow" style="margin:0 0 6px">Jamais vus, derrière ton revisionnage <b>' + inédites.length + '</b></div>' +
       inédites.map(({ sh, eps }) => {
         const e = eps[0];
         const code = "S" + p2(e.s) + "E" + p2(e.n || 0);
@@ -1363,7 +1369,7 @@ function vueListe(){
             svg("check", 14) + '<span>' + code + '</span></button>' +
         '</div>';
       }).join("") +
-      '<p class="note" style="margin-top:10px">Ces épisodes sont sortis depuis, mais ta file de revisionnage te ramène plus tôt dans la série. ' +
+      '<p class="note" style="margin-top:10px">Ces épisodes n\'ont jamais été vus, à aucun passage, et ta file de revisionnage te ramène plus tôt dans la série. ' +
       'Les cocher ici ne déplace pas ton passage en cours.</p></div>';
   })();
 
