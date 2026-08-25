@@ -331,9 +331,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.11.0";
+const VERSION = "1.12.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.12.0", d:"2026-08-25", t:"Langue des films", l:[
+    "Réglage Français ou English pour les titres, affiches et synopsis des films. Français par défaut.",
+    "Quand TMDb n'a pas de synopsis traduit, celui d'origine est repris plutôt qu'un champ vide.",
+    "Bouton pour repasser d'un coup toute la filmothèque déjà constituée dans la langue choisie.",
+    "Les séries ne sont pas concernées : TVmaze ne publie pas de traductions."
+  ]},
   { v:"1.11.0", d:"2026-08-25", t:"Films BetaSeries", l:[
     "Le fichier films-*.csv de l'export BetaSeries est repris : titres, statut vu ou à voir, et date de visionnage.",
     "Les titres en écriture d'origine sont retrouvés par TMDb, qui les indexe.",
@@ -542,6 +548,7 @@ const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, films:{}, settings:{ sp
 DEFAULTS.settings.theme = "sombre";
 DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de diffusion
 DEFAULTS.settings.filtre = "all";
+DEFAULTS.settings.langue = "fr";
 let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
@@ -1151,6 +1158,9 @@ async function jsonLibre(url){
   return r.json();
 }
 const cleTMDB = () => (DB.settings && DB.settings.tmdb || "").trim();
+const LANGUES = [["fr", "Français"], ["en", "English"]];
+const LANGUE = () => ((DB.settings && DB.settings.langue) === "en" ? "en-US" : "fr-FR");
+const langueNom = () => (LANGUE() === "en-US" ? "anglais" : "français");
 
 function normFilmTMDB(x){
   return {
@@ -1168,18 +1178,55 @@ async function chercherFilms(q){
   const cle = cleTMDB();
   if(!cle) throw new Error("clé TMDb absente");
   const d = await jsonLibre("https://api.themoviedb.org/3/search/movie?api_key=" + encodeURIComponent(cle) +
-    "&language=fr-FR&include_adult=false&query=" + encodeURIComponent(q));
+    "&language=" + LANGUE() + "&include_adult=false&query=" + encodeURIComponent(q));
   return (d.results || []).slice(0, 20).map(normFilmTMDB);
 }
 /* La recherche TMDb ne renvoie ni durée ni genres : on complète à l'ajout. */
 async function completerFilm(f){
   const cle = cleTMDB();
-  if(!cle || f.duree) return f;
+  if(!cle || f.duree || !/^tmdb:/.test(f.id)) return f;
+  const base = "https://api.themoviedb.org/3/movie/" + f.id.slice(5) + "?api_key=" + encodeURIComponent(cle);
   try{
-    const d = await jsonLibre("https://api.themoviedb.org/3/movie/" + f.id.slice(5) +
-      "?api_key=" + encodeURIComponent(cle) + "&language=fr-FR");
-    return { ...f, ...normFilmTMDB(d) };
+    const d = await jsonLibre(base + "&language=" + LANGUE());
+    const plein = { ...f, ...normFilmTMDB(d) };
+    // TMDb n'a pas toujours de synopsis traduit : plutôt qu'un vide, on prend
+    // celui d'origine.
+    if(!plein.resume && LANGUE() !== "en-US"){
+      try{
+        const o = await jsonLibre(base + "&language=en-US");
+        if(o && o.overview) plein.resume = o.overview;
+      }catch(x){}
+    }
+    return plein;
   }catch(e){ return f; }
+}
+
+/* Réapplique la langue courante à toute la filmothèque. */
+async function relangueFilms(){
+  if(!cleTMDB()) return toast("Renseigne d'abord une clé TMDb");
+  const l = Object.values(DB.films).filter(f => /^tmdb:/.test(f.id));
+  if(!l.length) return toast("Aucun film à réactualiser");
+  impr.ouvrir("fl");
+  impr.dire(l.length + " films à repasser en " + langueNom() + ".");
+  let ok = 0;
+  for(let i = 0; i < l.length; i++){
+    if(state.annuler){ impr.dire("\nInterrompu."); break; }
+    impr.avance(i + 1, l.length, (l.length - i) * 0.4);
+    const f = l[i];
+    const avant = f.titre;
+    try{
+      const maj = await completerFilm({ id:f.id });
+      if(maj && maj.titre){
+        f.titre = maj.titre; f.resume = maj.resume; f.affiche = maj.affiche;
+        f.genres = maj.genres; f.duree = maj.duree; f.annee = maj.annee;
+        sauverFilm(f); ok++;
+        impr.dire("✓ " + f.titre + (f.titre !== avant ? "   ← " + avant : ""));
+      }else impr.dire("✗ " + avant);
+    }catch(e){ impr.dire("✗ " + avant); }
+    await sleep(150);
+  }
+  impr.dire("\n" + ok + " films réactualisés en " + langueNom() + ".");
+  impr.fermer(); render(); toast(ok + " films réactualisés");
 }
 
 const vuesFilm = f => Array.isArray(f.vu) ? f.vu : (f.vu ? [f.vu] : []);
@@ -1664,14 +1711,31 @@ function vueReglages(){
       '<button class="tg ' + (DB.settings.specials ? "on" : "") + '" data-act="tg" data-k="specials" role="switch" aria-checked="' + !!DB.settings.specials + '"></button></div>' +
   '</div>' +
 
-  '<div class="eyebrow">Source des films</div>' +
+  '<div class="eyebrow">Films</div>' +
   '<div class="box"><h3>Clé TMDb</h3>' +
     '<p class="note">La recherche de films passe par TMDb. La clé est gratuite : compte sur themoviedb.org, puis Paramètres → API. ' +
     'Elle reste dans ce navigateur et n\'est envoyée qu\'à TMDb.</p>' +
     '<div class="search" style="margin-top:11px"><input id="cle-tmdb" type="text" placeholder="Clé API TMDb (facultatif)" ' +
       'autocomplete="off" spellcheck="false" value="' + esc(DB.settings.tmdb || "") + '"></div>' +
     '<div class="mono" style="font-size:11px;color:' + (cleTMDB() ? "var(--vu)" : "var(--gris)") + ';margin-top:8px">' +
-      (cleTMDB() ? "Clé enregistrée — recherche de films active" : "Aucune clé : la recherche de films est désactivée") + '</div></div>' +
+      (cleTMDB() ? "Clé enregistrée — recherche de films active" : "Aucune clé : la recherche de films est désactivée") + '</div>' +
+
+    '<div style="font-size:13.5px;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--trait)">Langue des films</div>' +
+    '<div class="seg">' + LANGUES.map(([id, l]) =>
+      '<button class="' + ((DB.settings.langue || "fr") === id ? "on" : "") + '" data-act="langue" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
+    '<p class="note" style="margin-top:9px">Titres, affiches et synopsis des films, tels que TMDb les publie dans cette langue. ' +
+    'Quand un synopsis traduit n\'existe pas, celui d\'origine est repris plutôt qu\'un vide.</p>' +
+    '<p class="note" style="margin-top:7px">Le changement s\'applique aux prochaines recherches. Pour les films déjà dans ta liste :</p>' +
+    '<button class="btn full" style="margin-top:9px" data-act="relangue">Repasser mes films en ' + langueNom() + '</button>' +
+    '<div class="pgt hide" id="fl-bar"><i></i></div>' +
+    '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
+      '<div class="mono" id="fl-etat" style="font-size:11px;color:var(--gris);flex:1"></div>' +
+      '<button class="btn sm dgr hide" id="fl-stop" data-act="stop-import">Interrompre</button></div>' +
+    '<div class="log hide" id="fl-log"></div>' +
+
+    '<p class="note" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--trait)">' +
+    '<b>Les séries ne sont pas concernées.</b> Elles viennent de TVmaze, qui publie titres, synopsis et noms d\'épisodes ' +
+    'dans la langue d\'origine sans proposer de traduction. Ce réglage ne peut donc rien y changer.</p></div>' +
 
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
@@ -1932,6 +1996,12 @@ document.addEventListener("click", async ev => {
     if(sh){ ajouterShow(sh, "planned"); render(); ouvrirFiche(+id); }
     return;
   }
+  if(act === "langue"){
+    DB.settings.langue = id; sauver(); render();
+    toast("Films en " + langueNom());
+    return;
+  }
+  if(act === "relangue"){ await relangueFilms(); return; }
   if(act === "theme"){
     DB.settings.theme = id;
     try{ localStorage.setItem(LSTHEME, id); }catch(e){}
