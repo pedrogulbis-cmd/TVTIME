@@ -25,6 +25,7 @@
   --lisere:rgba(240,234,224,.08);
   --bAir:#4a3f5e; --bFut:#2e2740; --bRev:#3f6b5c;
   --h1:#1e4a3d; --h2:#2b7059; --h3:#419b77; --h4:#7ee0b8;
+  --or:#f5c451;
   --r:12px;
   --tab:calc(60px + env(safe-area-inset-bottom));
 }
@@ -40,6 +41,7 @@ html[data-theme="clair"]{
   --lisere:rgba(34,27,46,.1);
   --bAir:#b7abcb; --bFut:#e5dfee; --bRev:#8fc9b4;
   --h1:#cdeade; --h2:#93d2ba; --h3:#4fae8c; --h4:#0f7a5a;
+  --or:#d99b06;
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
@@ -143,6 +145,19 @@ nav.tabs{
 .ott{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 5px 5px;border-radius:9px;
   background:var(--carte2);border:1px solid var(--trait);font-size:12.5px;color:var(--papier)}
 .ott img{width:22px;height:22px;border-radius:5px;display:block}
+/* Favori : une pastille en coin d'affiche, sans bouton de plus dans la liste. */
+.fav{position:absolute;top:3px;right:4px;z-index:2;font-size:13px;line-height:1;color:var(--or);
+  text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.8)}
+.fav::before{content:"★"}
+.btn.etoile{color:var(--or);border-color:var(--or)}
+/* Panneau « Ce soir ? » */
+.voile{position:fixed;inset:0;z-index:70;background:rgba(0,0,0,.55);display:flex;
+  align-items:flex-end;justify-content:center;padding:14px;
+  padding-bottom:calc(var(--tab) + 14px);backdrop-filter:blur(2px)}
+.modal{background:var(--carte);border:1px solid var(--trait);border-radius:16px;width:100%;
+  max-width:520px;padding:15px;max-height:78vh;overflow-y:auto;animation:up .2s cubic-bezier(.2,.8,.3,1)}
+.modal h2{font-size:18px;margin-bottom:3px}
+@media(min-width:520px){.voile{align-items:center}}
 .xn{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--vu);
   background:var(--vuF);border:1px solid var(--vuB);border-radius:5px;
   padding:0 5px;flex:0 0 auto}
@@ -329,6 +344,14 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
     </div>
     <button class="ver" id="ver-chip" data-act="changelog" title="Voir les nouveautés"></button>
     <div class="top-sp"></div>
+    <button class="iconbtn hide" id="de" data-act="tirage" aria-label="Choisir quoi regarder" title="Ce soir ?">
+      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="3.2" y="3.2" width="17.6" height="17.6" rx="4.5" stroke="currentColor" stroke-width="1.9"/>
+        <circle cx="8.4" cy="8.4" r="1.5" fill="currentColor"/>
+        <circle cx="12" cy="12" r="1.5" fill="currentColor"/>
+        <circle cx="15.6" cy="15.6" r="1.5" fill="currentColor"/>
+      </svg>
+    </button>
     <button class="iconbtn" data-act="go-search" aria-label="Rechercher une série">
       <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
     </button>
@@ -342,6 +365,7 @@ textarea{width:100%;background:var(--carte2);border:1px solid var(--trait);borde
 </nav>
 
 <div id="sheet"></div>
+<div id="modal"></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -360,9 +384,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.14.0";
+const VERSION = "1.15.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.15.0", d:"2026-08-25", t:"Favoris et tirage au sort", l:[
+    "Une étoile dans chaque fiche, série comme film, et une pastille dorée en coin d'affiche dans les listes.",
+    "Filtre Favoris en tête des rangées de filtres, des deux côtés.",
+    "Bouton dé dans l'entête, à gauche de la loupe, visible sur Séries et Films.",
+    "« Ce soir ? » tire au hasard dans ce qui t'attend, avec filtre par temps disponible et bascule séries ou films.",
+    "Le tirage évite de reproposer la même chose deux fois de suite."
+  ]},
   { v:"1.14.0", d:"2026-08-25", t:"Mémoire et entretien", l:[
     "Carte d'activité annuelle : une case par jour, du plus clair au plus dense, avec sélection de l'année.",
     "Rétrospective : épisodes, films, temps d'écran, jours actifs, séries les plus regardées, mois le plus chargé et journée record.",
@@ -787,6 +818,7 @@ function ajouterShow(sh, statut){
     userStatus: statut || old.userStatus || "watching",
     pass: old.pass || 1,
     activite: old.activite || Date.now(),
+    favorite: old.favorite || false,
     archive: old.archive || false,
     favorite: old.favorite || false,
     addedAt: old.addedAt || Date.now(),
@@ -983,7 +1015,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
-                anStats:"", fAnnee:"", fReste:"", doublons:null,
+                anStats:"", fAnnee:"", fReste:"", doublons:null, tirage:null,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -1031,6 +1063,10 @@ function dessiner(){
       '<span>' + t.l + '</span></button>';
   }).join("");
 
+  const de = $("#de");
+  if(de) de.classList.toggle("hide", !(state.tab === "library" || state.tab === "films") || state.cherche);
+  $("#modal").innerHTML = state.tirage ? vueTirage() : "";
+
   const chip = $("#ver-chip");
   if(chip){ chip.textContent = "v" + VERSION; chip.classList.toggle("neuf", state.neuf); }
 
@@ -1049,7 +1085,7 @@ function dessiner(){
     if(el) el.classList.add("neuve");
     state.animer = false;
   }
-  document.body.style.overflow = (state.detail || state.detailF) ? "hidden" : "";
+  document.body.style.overflow = (state.detail || state.detailF || state.tirage) ? "hidden" : "";
 }
 
 /* ---------- bandes de diffusion (élément signature) ---------- */
@@ -1076,9 +1112,10 @@ function bande(sh){
 /* ---------- carte série ---------- */
 function affiche(sh, cls){
   const c = cls || "";
+  const pip = sh.favorite ? '<span class="fav" title="Favori"></span>' : "";
   return sh.poster
-    ? '<div class="poster ' + c + '" style="background-image:url(' + esc(sh.poster) + ')"></div>'
-    : '<div class="poster ' + c + '"><div class="ph">' + esc((sh.name || "?")[0].toUpperCase()) + '</div></div>';
+    ? '<div class="poster ' + c + '" style="background-image:url(' + esc(sh.poster) + ')">' + pip + '</div>'
+    : '<div class="poster ' + c + '"><div class="ph">' + esc((sh.name || "?")[0].toUpperCase()) + '</div>' + pip + '</div>';
 }
 
 function carteSerie(sh){
@@ -1128,7 +1165,7 @@ function listeASuivre(){
 }
 /* ---------- vue : Ma liste ---------- */
 const FILTRES = [
-  { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
+  { id:"all", l:"Toutes" }, { id:"fav", l:"Favoris" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
   { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
   { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }, { id:"archived", l:"Archivées" }
 ];
@@ -1144,6 +1181,7 @@ function vueListe(){
   // Les archives n'apparaissent que dans « Toutes », reléguées en bas, et dans leur propre filtre.
   if(f === "archived")      l = l.filter(sh => sh.archive);
   else if(f !== "all")      l = l.filter(sh => !sh.archive);
+  if(f === "fav")           l = l.filter(sh => sh.favorite);
   if(f === "rewatch")       l = l.filter(sh => passe(sh) > 1);
   else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
   else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
@@ -1414,6 +1452,7 @@ function ajouterFilm(f, statut){
     vu: anc.vu || [],
     statut: statut || anc.statut || "planned",
     archive: anc.archive || false,
+    favorite: anc.favorite || false,
     ajoute: anc.ajoute || Date.now(),
     activite: Date.now()
   };
@@ -1442,7 +1481,7 @@ function tempsFilms(){
 
 /* ---------- vue : Films ---------- */
 const FILTRES_F = [
-  { id:"all", l:"Tous" }, { id:"planned", l:"À voir" }, { id:"watched", l:"Vus" },
+  { id:"all", l:"Tous" }, { id:"fav", l:"Favoris" }, { id:"planned", l:"À voir" }, { id:"watched", l:"Vus" },
   { id:"rewatch", l:"Revus" }, { id:"archived", l:"Archivés" }
 ];
 function vueFilms(){
@@ -1460,7 +1499,8 @@ function vueFilms(){
   const f = state.filtreF;
   if(f === "archived")      l = l.filter(x => x.archive);
   else if(f !== "all")      l = l.filter(x => !x.archive);
-  if(f === "planned")       l = l.filter(x => !nbVuesFilm(x));
+  if(f === "fav")           l = l.filter(x => x.favorite);
+  else if(f === "planned")  l = l.filter(x => !nbVuesFilm(x));
   else if(f === "watched")  l = l.filter(x => nbVuesFilm(x) > 0);
   else if(f === "rewatch")  l = l.filter(x => nbVuesFilm(x) > 1);
 
@@ -1509,9 +1549,10 @@ function vueFilms(){
 }
 
 function afficheFilm(f){
+  const pip = f.favorite ? '<span class="fav" title="Favori"></span>' : "";
   return f.affiche
-    ? '<div class="poster" style="background-image:url(' + esc(f.affiche) + ')"></div>'
-    : '<div class="poster"><div class="ph">' + esc((f.titre || "?")[0].toUpperCase()) + '</div></div>';
+    ? '<div class="poster" style="background-image:url(' + esc(f.affiche) + ')">' + pip + '</div>'
+    : '<div class="poster"><div class="ph">' + esc((f.titre || "?")[0].toUpperCase()) + '</div>' + pip + '</div>';
 }
 function carteFilm(f){
   const n = nbVuesFilm(f);
@@ -1570,13 +1611,88 @@ function vueFicheFilm(f){
         '</div>' : "") +
       '<div class="eyebrow">Gestion</div>' +
       '<div class="grid2">' +
+        '<button class="btn' + (f.favorite ? " etoile" : "") + '" data-act="favori-f" data-id="' + esc(f.id) + '">' +
+          (f.favorite ? "★ Favori" : "☆ Mettre en favori") + '</button>' +
         '<button class="btn' + (f.archive ? " pri" : "") + '" data-act="archiver-f" data-id="' + esc(f.id) + '">' +
           svg("archive", 16) + (f.archive ? " Sortir des archives" : " Archiver") + '</button>' +
-        '<span></span>' +
       '</div>' +
       '<button class="btn dgr full" style="margin-top:9px" data-act="supprimer-f" data-id="' + esc(f.id) + '">' +
         svg("poubelle", 16) + ' Retirer le film</button>' +
     '</div></div>';
+}
+
+/* ============================================================
+   « CE SOIR ? » — tirage au sort dans la pile en attente
+   ============================================================ */
+const DUREES = [[0, "Peu importe"], [30, "30 min"], [45, "45 min"], [60, "1 h"], [90, "1 h 30"], [150, "2 h 30"]];
+
+function poolTirage(){
+  const t = state.tirage;
+  if(t.type === "films"){
+    let l = Object.values(DB.films).filter(f => !f.archive && !nbVuesFilm(f));
+    if(t.fav) l = l.filter(f => f.favorite);
+    if(t.duree) l = l.filter(f => (f.duree || 100) <= t.duree);
+    return l;
+  }
+  let l = Object.values(DB.shows).filter(sh => !sh.archive && sh.userStatus !== "dropped" && prochainAVoir(sh));
+  if(t.fav) l = l.filter(sh => sh.favorite);
+  if(t.duree) l = l.filter(sh => { const e = prochainAVoir(sh); return (e.r || sh.runtime || 42) <= t.duree; });
+  return l;
+}
+function tirer(){
+  const l = poolTirage();
+  if(!l.length){ state.tirage.id = null; return; }
+  let choisi, essais = 0;
+  do{ choisi = l[Math.floor(Math.random() * l.length)]; essais++; }
+  while(l.length > 1 && String(choisi.id) === String(state.tirage.id) && essais < 10);
+  state.tirage.id = choisi.id;
+}
+function vueTirage(){
+  const t = state.tirage;
+  if(!t) return "";
+  const films = t.type === "films";
+  const pool = poolTirage();
+  const choisi = films ? DB.films[t.id] : DB.shows[t.id];
+
+  const chips = '<div class="chips" style="margin-top:11px">' + DUREES.map(([v, l]) =>
+    '<button class="chip ' + (t.duree === v ? "on" : "") + '" data-act="tir-duree" data-id="' + v + '">' + l + '</button>').join("") + '</div>' +
+    '<div class="chips" style="margin-top:6px">' +
+      '<button class="chip ' + (t.fav ? "on" : "") + '" data-act="tir-fav">★ Favoris seulement</button>' +
+      '<button class="chip ' + (!films ? "on" : "") + '" data-act="tir-type" data-id="series">Séries</button>' +
+      '<button class="chip ' + (films ? "on" : "") + '" data-act="tir-type" data-id="films">Films</button>' +
+    '</div>';
+
+  let corps;
+  if(!choisi){
+    corps = '<div class="empty" style="padding:26px 8px"><p>Rien ne correspond dans ta pile' +
+      (t.duree ? " en moins de " + dureeLongue(t.duree) : "") + (t.fav ? ", parmi tes favoris" : "") + '.</p></div>';
+  }else if(films){
+    corps = '<div class="card row" style="margin-top:13px">' + afficheFilm(choisi) +
+      '<div class="info"><div class="title">' + esc(choisi.titre) + '</div>' +
+      '<div class="sub">' + esc([choisi.annee, (choisi.genres || [])[0], choisi.duree ? choisi.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
+      (choisi.resume ? '<div class="sub" style="-webkit-line-clamp:3;margin-top:6px">' + esc(choisi.resume) + '</div>' : "") +
+      '</div></div>';
+  }else{
+    const ep = prochainAVoir(choisi);
+    corps = '<div class="card row" style="margin-top:13px">' + affiche(choisi) +
+      '<div class="info"><div class="title">' + esc(choisi.name) + '</div>' +
+      '<div style="margin-top:5px"><span class="code next">S' + p2(ep.s) + 'E' + p2(ep.n || 0) + '</span></div>' +
+      '<div class="sub" style="margin-top:5px">' + esc(ep.t || "Épisode") + '</div>' +
+      '<div class="stripmeta"><span>' + (ep.r || choisi.runtime || 42) + ' min</span>' +
+        '<span>' + avancement(choisi).pct + ' % vus</span></div>' +
+      '</div></div>';
+  }
+
+  return '<div class="voile" data-act="tir-fermer"><div class="modal" data-act="rien">' +
+    '<div style="display:flex;align-items:baseline;gap:9px">' +
+      '<h2>Ce soir ?</h2>' +
+      '<span class="mono" style="font-size:11px;color:var(--gris);margin-left:auto">' + pool.length + ' au choix</span></div>' +
+    '<p class="note">Un tirage au hasard dans ce qui t\'attend.</p>' +
+    chips + corps +
+    '<div class="grid2" style="margin-top:13px">' +
+      '<button class="btn" data-act="tir-encore"' + (pool.length < 2 ? " disabled" : "") + '>Une autre</button>' +
+      (choisi ? '<button class="btn pri" data-act="tir-ouvrir">Ouvrir</button>' : '<button class="btn" data-act="tir-fermer">Fermer</button>') +
+    '</div></div></div>';
 }
 
 /* ---------- vue : Agenda ---------- */
@@ -1929,10 +2045,12 @@ function vueFiche(sh){
       '<div class="stack">' + blocsSaisons + '</div>' +
       '<div class="eyebrow">Gestion</div>' +
       '<div class="grid2">' +
+        '<button class="btn' + (sh.favorite ? " etoile" : "") + '" data-act="favori" data-id="' + sh.id + '">' +
+          (sh.favorite ? "★ Favorite" : "☆ Mettre en favori") + '</button>' +
         '<button class="btn' + (sh.archive ? " pri" : "") + '" data-act="archiver" data-id="' + sh.id + '">' +
           svg("archive", 16) + (sh.archive ? " Sortir des archives" : " Archiver") + '</button>' +
-        (sh.url ? '<a class="btn" href="' + esc(sh.url) + '" target="_blank" rel="noopener">Fiche TVmaze</a>' : '<span></span>') +
       '</div>' +
+      (sh.url ? '<a class="btn full" style="margin-top:9px" href="' + esc(sh.url) + '" target="_blank" rel="noopener">Fiche TVmaze</a>' : "") +
       '<button class="btn dgr full" style="margin-top:9px" data-act="remove" data-id="' + sh.id + '">' +
         svg("poubelle", 16) + ' Retirer la série</button>' +
     '</div></div>';
@@ -2224,6 +2342,38 @@ document.addEventListener("click", async ev => {
     state.cherche = false; state.tab = "reglages"; state.journal = true; state.neuf = false;
     DB.meta.vue = VERSION; sauver(); render();
     setTimeout(() => { const a = $("#anc-journal"); if(a) a.scrollIntoView({ behavior:"smooth", block:"start" }); }, 60);
+    return;
+  }
+  if(act === "rien"){ ev.stopPropagation(); return; }
+  if(act === "tirage"){
+    state.tirage = { type:state.tab === "films" ? "films" : "series", duree:0, fav:false, id:null };
+    tirer(); render(); return;
+  }
+  if(act === "tir-fermer"){
+    if(el.classList.contains("voile") && ev.target !== el) return;
+    state.tirage = null; render(); return;
+  }
+  if(act === "tir-encore"){ tirer(); render(); return; }
+  if(act === "tir-duree"){ state.tirage.duree = +id; tirer(); render(); return; }
+  if(act === "tir-fav"){ state.tirage.fav = !state.tirage.fav; tirer(); render(); return; }
+  if(act === "tir-type"){ state.tirage.type = id; state.tirage.id = null; tirer(); render(); return; }
+  if(act === "tir-ouvrir"){
+    const t = state.tirage; if(!t || !t.id) return;
+    const films = t.type === "films", cible = t.id;
+    state.tirage = null; render();
+    films ? ouvrirFicheFilm(cible) : ouvrirFiche(+cible);
+    return;
+  }
+  if(act === "favori"){
+    const sh = DB.shows[+id]; if(!sh) return;
+    sh.favorite = !sh.favorite; sauverShow(sh); render();
+    toast(sh.favorite ? "« " + sh.name + " » en favoris" : "Retirée des favoris");
+    return;
+  }
+  if(act === "favori-f"){
+    const f = DB.films[id]; if(!f) return;
+    f.favorite = !f.favorite; sauverFilm(f); render();
+    toast(f.favorite ? "« " + f.titre + " » en favori" : "Retiré des favoris");
     return;
   }
   if(act === "go-search"){
