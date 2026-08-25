@@ -138,6 +138,9 @@ nav.tabs{
 .etat.en::before{background:var(--vu);border-color:var(--vu)}
 .etat.att{color:var(--papier)}
 .etat.att::before{background:var(--signal);border-color:var(--signal)}
+.ott{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 5px 5px;border-radius:9px;
+  background:var(--carte2);border:1px solid var(--trait);font-size:12.5px;color:var(--papier)}
+.ott img{width:22px;height:22px;border-radius:5px;display:block}
 .xn{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--vu);
   background:var(--vuF);border:1px solid var(--vuB);border-radius:5px;
   padding:0 5px;flex:0 0 auto}
@@ -261,7 +264,12 @@ nav.tabs{
 .empty p{margin:0 0 16px;font-size:13.5px}
 .toast{position:fixed;left:50%;bottom:calc(var(--tab) + 14px);transform:translateX(-50%) translateY(70px);
   background:var(--papier);color:var(--encre);padding:10px 16px;border-radius:10px;font-size:13.5px;
-  font-weight:600;z-index:90;opacity:0;transition:.24s;max-width:88vw;text-align:center;pointer-events:none}
+  font-weight:600;z-index:90;opacity:0;transition:.24s;max-width:88vw;text-align:center;pointer-events:none;
+  display:flex;align-items:center;gap:12px;justify-content:center}
+.toast.agir{pointer-events:auto;padding-right:8px}
+.toast-act{background:var(--encre);color:var(--papier);border-radius:7px;padding:6px 11px;
+  font-size:12.5px;font-weight:600;white-space:nowrap}
+.toast-act:active{opacity:.75}
 .toast.on{transform:translateX(-50%);opacity:1}
 .note{font-size:12.5px;color:var(--gris);line-height:1.55}
 .box{background:var(--carte);border:1px solid var(--trait);border-radius:var(--r);padding:13px}
@@ -331,9 +339,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.12.0";
+const VERSION = "1.13.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.13.0", d:"2026-08-25", t:"Où regarder, mise à jour ciblée, annulation", l:[
+    "Les fiches séries et films indiquent sur quelles plateformes le contenu est disponible dans le pays choisi.",
+    "Le pays se règle dans les Réglages ; les disponibilités viennent de JustWatch via TMDb et sont conservées douze jours.",
+    "La mise à jour du catalogue ne tourne plus en rond : un seul appel liste ce qui a bougé, et seules ces séries sont retéléchargées.",
+    "Nouveau bouton « Actualiser les séries modifiées », avec journal et interruption possible.",
+    "Retirer une série ou un film propose « Annuler » pendant quelques secondes, épisodes vus compris.",
+    "Les Réglages rappellent la date du dernier export, et l'onglet porte un point d'alerte au-delà de deux mois."
+  ]},
   { v:"1.12.0", d:"2026-08-25", t:"Langue des films", l:[
     "Réglage Français ou English pour les titres, affiches et synopsis des films. Français par défaut.",
     "Quand TMDb n'a pas de synopsis traduit, celui d'origine est repris plutôt qu'un champ vide.",
@@ -508,10 +524,19 @@ function dureeLongue(min){
   if(h) return m ? h + " h " + p2(m) : h + " h";
   return m + " min";
 }
-function toast(msg){
-  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
-  clearTimeout(toast._t); toast._t = setTimeout(() => t.classList.remove("on"), 2400);
+function toast(msg, action){
+  const t = $("#toast");
+  t.innerHTML = '<span>' + esc(msg) + '</span>' +
+    (action ? '<button class="toast-act" data-act="' + action + '">Annuler</button>' : "");
+  t.classList.toggle("agir", !!action);
+  t.classList.add("on");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove("on"), action ? 6500 : 2400);
 }
+function fermerToast(){ const t = $("#toast"); if(t) t.classList.remove("on"); clearTimeout(toast._t); }
+
+/* Ce qu'on vient de supprimer, gardé le temps d'un éventuel remords. */
+let corbeille = null;
 
 /* ---------- file d'attente réseau (respect du quota TVmaze) ---------- */
 const net = (() => {
@@ -549,6 +574,7 @@ DEFAULTS.settings.theme = "sombre";
 DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de diffusion
 DEFAULTS.settings.filtre = "all";
 DEFAULTS.settings.langue = "fr";
+DEFAULTS.settings.pays = "FR";
 let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
@@ -669,6 +695,17 @@ async function reprendreLocalStorage(){
     settings:d.settings || {}, version:SCHEMA,
     meta:{ ...(d.meta || {}), repris:new Date().toISOString() } } });
   return shows.length;
+}
+
+/* ---------- fraîcheur de la sauvegarde ---------- */
+function joursDepuisExport(){
+  if(!DB.meta || !DB.meta.exporte) return null;
+  return Math.floor((Date.now() - DB.meta.exporte) / 86400000);
+}
+function sauvegardeVieille(){
+  if(Object.keys(DB.shows).length + Object.keys(DB.films).length < 5) return false;
+  const j = joursDepuisExport();
+  return j === null || j > 60;
 }
 
 /* ---------- espace disque ---------- */
@@ -937,7 +974,8 @@ function render(){
 function dessiner(){
   $("#tabs").innerHTML = TABS.map(t => {
     const n = t.id === "library" ? listeASuivre().length
-            : t.id === "films"   ? Object.values(DB.films).filter(f => !f.archive && !nbVuesFilm(f)).length : 0;
+            : t.id === "films"   ? Object.values(DB.films).filter(f => !f.archive && !nbVuesFilm(f)).length
+            : t.id === "reglages" && sauvegardeVieille() ? "!" : 0;
     return '<button class="tab tab-wrap ' + (state.tab === t.id ? "on" : "") + '" data-act="tab" data-id="' + t.id + '">' +
       '<span style="position:relative;display:flex">' + svg(t.i, 20) +
       (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + '</span>' : "") + '</span>' +
@@ -1161,6 +1199,76 @@ const cleTMDB = () => (DB.settings && DB.settings.tmdb || "").trim();
 const LANGUES = [["fr", "Français"], ["en", "English"]];
 const LANGUE = () => ((DB.settings && DB.settings.langue) === "en" ? "en-US" : "fr-FR");
 const langueNom = () => (LANGUE() === "en-US" ? "anglais" : "français");
+const PAYS = [["FR","France"],["BE","Belgique"],["CH","Suisse"],["CA","Canada"],["GB","Royaume-Uni"],["US","États-Unis"]];
+const paysOTT = () => (DB.settings && DB.settings.pays) || "FR";
+const paysNom = () => ((PAYS.find(x => x[0] === paysOTT()) || [,"France"])[1]);
+const OTT_FRAIS = 12 * 86400000;
+
+/* TMDb identifie les séries par son propre numéro : on le retrouve une fois
+   à partir de l'identifiant IMDb ou TVDB fourni par TVmaze, puis on le garde. */
+async function tmdbIdSerie(sh){
+  if(sh.tmdb) return sh.tmdb;
+  const cle = cleTMDB(); if(!cle) return null;
+  const essais = [];
+  if(sh.imdb) essais.push(["imdb_id", sh.imdb]);
+  if(sh.tvdb) essais.push(["tvdb_id", sh.tvdb]);
+  for(const [src, val] of essais){
+    try{
+      const d = await jsonLibre("https://api.themoviedb.org/3/find/" + encodeURIComponent(val) +
+        "?api_key=" + encodeURIComponent(cle) + "&external_source=" + src);
+      const r = d && d.tv_results && d.tv_results[0];
+      if(r){ sh.tmdb = r.id; sauverShow(sh); return r.id; }
+    }catch(e){}
+  }
+  return null;
+}
+async function chargerOTT(ent, type){
+  const cle = cleTMDB(); if(!cle) return null;
+  const pays = paysOTT();
+  if(ent.ott && ent.ott.pays === pays && Date.now() - ent.ott.maj < OTT_FRAIS) return ent.ott;
+  const id = type === "movie" ? String(ent.id).replace(/^tmdb:/, "") : await tmdbIdSerie(ent);
+  if(!id || !/^\d+$/.test(String(id))){
+    ent.ott = { maj:Date.now(), pays, lien:"", flat:[], loc:[], sansId:type === "tv" };
+    type === "movie" ? sauverFilm(ent) : sauverShow(ent);
+    return ent.ott;
+  }
+  try{
+    const d = await jsonLibre("https://api.themoviedb.org/3/" + type + "/" + id +
+      "/watch/providers?api_key=" + encodeURIComponent(cle));
+    const r = (d && d.results && d.results[pays]) || {};
+    const pick = a => (a || []).slice(0, 10).map(x => ({ n:x.provider_name, l:x.logo_path }));
+    ent.ott = { maj:Date.now(), pays, lien:r.link || "", flat:pick(r.flatrate), loc:pick(r.rent || r.buy) };
+    type === "movie" ? sauverFilm(ent) : sauverShow(ent);
+    return ent.ott;
+  }catch(e){ return null; }
+}
+function chargerOTTPuisRendre(ent, type){
+  if(!ent || !cleTMDB()) return;
+  if(ent.ott && ent.ott.pays === paysOTT() && Date.now() - ent.ott.maj < OTT_FRAIS) return;
+  const cle = ent.id;
+  chargerOTT(ent, type).then(() => {
+    if(state.detail === cle || state.detailF === cle) render();
+  });
+}
+function blocOTT(ent){
+  if(!cleTMDB()) return "";
+  const o = ent.ott;
+  const titre = '<div class="eyebrow">Où regarder <b>' + esc(paysNom()) + '</b></div>';
+  if(!o || o.pays !== paysOTT())
+    return titre + '<div class="box"><p class="note">Recherche des plateformes…</p></div>';
+  if(o.sansId)
+    return titre + '<div class="box"><p class="note">Cette série n\'a pas de correspondance dans TMDb, la diffusion ne peut pas être vérifiée.</p></div>';
+  const ch = a => '<div class="chips" style="flex-wrap:wrap">' + a.map(x =>
+    '<span class="ott">' + (x.l ? '<img src="https://image.tmdb.org/t/p/w45' + esc(x.l) + '" alt="" loading="lazy">' : "") +
+    esc(x.n) + '</span>').join("") + '</div>';
+  if(!o.flat.length && !o.loc.length)
+    return titre + '<div class="box"><p class="note">Aucune diffusion connue en ' + esc(paysNom()) + '.</p></div>';
+  return titre + '<div class="box">' +
+    (o.flat.length ? '<div class="note" style="margin-bottom:8px">Compris dans un abonnement</div>' + ch(o.flat) : "") +
+    (o.loc.length ? '<div class="note" style="margin:' + (o.flat.length ? "13px" : "0") + ' 0 8px">Location ou achat</div>' + ch(o.loc) : "") +
+    (o.lien ? '<a class="btn full" style="margin-top:12px" href="' + esc(o.lien) + '" target="_blank" rel="noopener">Ouvrir la fiche JustWatch</a>' : "") +
+    '<p class="note" style="margin-top:9px">Disponibilités fournies par JustWatch via TMDb.</p></div>';
+}
 
 function normFilmTMDB(x){
   return {
@@ -1385,6 +1493,7 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
+      blocOTT(f) +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
       (n ? '<div class="eyebrow">Visionnages <b>' + n + '</b></div><div class="box">' +
         vuesFilm(f).map((d, k) => '<div class="ep" style="padding:7px 0">' +
@@ -1634,6 +1743,7 @@ function vueFiche(sh){
           '<button class="btn" data-act="rewatch" data-id="' + sh.id + '">Revoir depuis le début</button>' +
           (P > 1 ? '<button class="btn dgr" data-act="unwatch" data-id="' + sh.id + '">Annuler le passage ' + P + '</button>' : '<span></span>') +
         '</div></div>' +
+      blocOTT(sh) +
       (sh.summary ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(sh.summary) + '</p>' : "") +
       '<div class="eyebrow">Épisodes <b>' + a.total + '</b></div>' +
       '<div class="stack">' + blocsSaisons + '</div>' +
@@ -1654,7 +1764,17 @@ function vueReglages(){
   const nf = Object.keys(DB.films).length;
   const e = Object.values(DB.watched).reduce((t, v) => t + (Array.isArray(v) ? v.length : 1), 0);
   return '<div class="eyebrow">Sauvegarde</div>' +
-  '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, épisodes vus, statuts. Garde-la, c\'est ton seul filet.</p>' +
+  '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, films, visionnages, statuts. Garde-la, c\'est ton seul filet.</p>' +
+    (function(){
+      const j = joursDepuisExport();
+      const vieux = sauvegardeVieille();
+      const txt = j === null ? "Aucun export réalisé depuis ce navigateur."
+        : j === 0 ? "Dernier export aujourd'hui."
+        : j === 1 ? "Dernier export hier."
+        : "Dernier export il y a " + j + " jours.";
+      return '<p class="note" style="margin-top:7px;color:' + (vieux ? "var(--signal)" : "var(--vu)") + '">' +
+        esc(txt) + (vieux ? " Tes données ne vivent que dans ce navigateur." : "") + '</p>';
+    })() +
     '<div class="grid2" style="margin-top:11px">' +
       '<button class="btn" data-act="export-json">Fichier JSON</button>' +
       '<button class="btn" data-act="export-csv">Fichier CSV</button></div></div>' +
@@ -1733,8 +1853,14 @@ function vueReglages(){
       '<button class="btn sm dgr hide" id="fl-stop" data-act="stop-import">Interrompre</button></div>' +
     '<div class="log hide" id="fl-log"></div>' +
 
+    '<div style="font-size:13.5px;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--trait)">Pays pour les plateformes</div>' +
+    '<div class="chips" style="flex-wrap:wrap">' + PAYS.map(([id, l]) =>
+      '<button class="chip ' + (paysOTT() === id ? "on" : "") + '" data-act="pays" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
+    '<p class="note" style="margin-top:9px">Détermine où chercher les plateformes de diffusion affichées sur les fiches, séries comme films. ' +
+    'Les disponibilités viennent de JustWatch via TMDb et sont conservées douze jours.</p>' +
+
     '<p class="note" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--trait)">' +
-    '<b>Les séries ne sont pas concernées.</b> Elles viennent de TVmaze, qui publie titres, synopsis et noms d\'épisodes ' +
+    '<b>La langue ne s\'applique pas aux séries.</b> Elles viennent de TVmaze, qui publie titres, synopsis et noms d\'épisodes ' +
     'dans la langue d\'origine sans proposer de traduction. Ce réglage ne peut donc rien y changer.</p></div>' +
 
   '<div class="eyebrow">Données</div>' +
@@ -1753,7 +1879,15 @@ function vueReglages(){
         '<div class="note">Sans lui, un navigateur peut effacer les données d\'un site resté longtemps sans visite. ' +
         'Le mettre en place ne coûte rien et ne change rien d\'autre.</div></div>' +
       (state.durable ? '' : '<button class="btn sm" data-act="durable">Activer</button>') + '</div>' +
-    '<button class="btn full" style="margin-top:11px" data-act="refresh-all">Actualiser toutes les séries</button></div>' +
+    '<button class="btn full pri" style="margin-top:11px" data-act="maj-ciblee">Actualiser les séries modifiées</button>' +
+    '<div class="pgt hide" id="maj-bar"><i></i></div>' +
+    '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
+      '<div class="mono" id="maj-etat" style="font-size:11px;color:var(--gris);flex:1"></div>' +
+      '<button class="btn sm dgr hide" id="maj-stop" data-act="stop-import">Interrompre</button></div>' +
+    '<div class="log hide" id="maj-log"></div>' +
+    '<p class="note" style="margin-top:9px">Un seul appel suffit à savoir lesquelles ont bougé le mois dernier ; ' +
+    'seules celles-là sont retéléchargées. Antenne fait la même chose discrètement à chaque ouverture, sur une semaine.</p>' +
+    '<button class="btn full" style="margin-top:9px" data-act="refresh-all">Tout retélécharger (long)</button></div>' +
 
   '<div class="eyebrow" id="anc-journal">Version</div>' +
   '<div class="box"><div style="display:flex;align-items:baseline;gap:10px">' +
@@ -1861,10 +1995,31 @@ document.addEventListener("click", async ev => {
   if(act === "supprimer-f"){
     const f = DB.films[id]; if(!f) return;
     if(!confirm("Retirer « " + f.titre + " » de tes films ?\n\nSes visionnages seront effacés. Pour le garder sans le suivre, archive-le plutôt.")) return;
+    corbeille = { type:"film", objet:f };
     retirerFilm(id);
     if(state.detailF === id){ state.detailF = null; render(); history.back(); }
     else render();
-    toast("Film retiré"); return;
+    toast("« " + f.titre + " » retiré", "annuler-suppr");
+    return;
+  }
+  if(act === "annuler-suppr"){
+    if(!corbeille) return fermerToast();
+    if(corbeille.type === "serie"){
+      const sh = corbeille.objet;
+      DB.shows[sh.id] = sh;
+      sale.suppr.delete(String(sh.id));
+      Object.keys(corbeille.vues).forEach(k => { DB.watched[k] = corbeille.vues[k]; salirVues(k); });
+      sauverShow(sh);
+      toast("« " + sh.name + " » restaurée");
+    }else{
+      const f = corbeille.objet;
+      DB.films[f.id] = f;
+      sale.supprFilms.delete(String(f.id));
+      sauverFilm(f);
+      toast("« " + f.titre + " » restauré");
+    }
+    corbeille = null; render();
+    return;
   }
   if(act === "filtre-f"){ state.filtreF = id; state.limiteF = PAGE; render(); window.scrollTo(0, 0); return; }
   if(act === "tri-f"){ state.triF = id; state.limiteF = PAGE; render(); window.scrollTo(0, 0); return; }
@@ -1879,7 +2034,11 @@ document.addEventListener("click", async ev => {
   if(act === "supprimer"){
     const sh = DB.shows[+id]; if(!sh) return;
     if(!confirm("Retirer « " + sh.name + " » de ta liste ?\n\nSes épisodes cochés seront effacés. Pour la garder sans la suivre, archive-la plutôt.")) return;
-    retirerShow(+id); render(); toast("Série retirée");
+    const vues2 = {};
+    (sh.eps || []).forEach(e => { if(DB.watched[e.i]) vues2[e.i] = DB.watched[e.i]; });
+    corbeille = { type:"serie", objet:sh, vues:vues2 };
+    retirerShow(+id); render();
+    toast("« " + sh.name + " » retirée", "annuler-suppr");
     return;
   }
   if(act === "close-sheet"){ history.back(); return; }
@@ -1996,6 +2155,11 @@ document.addEventListener("click", async ev => {
     if(sh){ ajouterShow(sh, "planned"); render(); ouvrirFiche(+id); }
     return;
   }
+  if(act === "pays"){
+    DB.settings.pays = id; sauver(); render();
+    toast("Plateformes de " + paysNom());
+    return;
+  }
   if(act === "langue"){
     DB.settings.langue = id; sauver(); render();
     toast("Films en " + langueNom());
@@ -2014,7 +2178,11 @@ document.addEventListener("click", async ev => {
   if(act === "export-json") return exportJSON();
   if(act === "export-csv")  return exportCSV();
   if(act === "import-list") return importerListe();
-  if(act === "refresh-all") return actualiserTout();
+  if(act === "maj-ciblee") return actualiserMaj();
+  if(act === "refresh-all"){
+    if(!confirm("Retélécharger l'intégralité des séries ?\n\nCompte environ une seconde par série. « Actualiser les séries modifiées » suffit dans presque tous les cas.")) return;
+    return actualiserTout();
+  }
   if(act === "stop-import"){ state.annuler = true; toast("Interruption en cours…"); return; }
   if(act === "durable"){
     if(!navigator.storage || !navigator.storage.persist) return toast("Non géré par ce navigateur");
@@ -2052,6 +2220,7 @@ function ouvrirFicheFilm(id){
   state.detailF = id; state.animer = true;
   history.pushState({ film:id }, "", "#f" + encodeURIComponent(id));
   render();
+  chargerOTTPuisRendre(DB.films[id], "movie");
 }
 function ouvrirFiche(id){
   state.retour = window.scrollY;
@@ -2060,6 +2229,7 @@ function ouvrirFiche(id){
   if(DB.shows[id]) saisonCourante(DB.shows[id]);
   history.pushState({ fiche:id }, "", "#s" + id);
   render();
+  chargerOTTPuisRendre(DB.shows[id], "tv");
 }
 window.addEventListener("popstate", () => {
   if(state.detail || state.detailF){
@@ -2161,7 +2331,9 @@ function telecharger(nom, contenu, type){
 function exportJSON(){
   telecharger("antenne-v" + VERSION + "-" + todayISO() + ".json",
     JSON.stringify({ ...DB, app:"antenne", appVersion:VERSION, schema:SCHEMA, exportedAt:new Date().toISOString() }, null, 1));
+  DB.meta.exporte = Date.now(); sauver();
   toast("Sauvegarde v" + VERSION + " exportée");
+  if(state.tab === "reglages") render();
 }
 function exportCSV(){
   const l = ['show_name,tvmaze_id,season,episode,episode_name,airdate,watched_at,view_no'];
@@ -2761,16 +2933,65 @@ document.addEventListener("change", ev => {
   ev.target.value = "";
 });
 
-/* ---------- rafraîchissement discret des séries en cours ---------- */
+/* ---------- mise à jour du catalogue ----------
+   TVmaze publie la date de dernière modification de tout son catalogue en un
+   seul appel. On la compare à celle de nos fiches et on ne retélécharge que
+   ce qui a réellement bougé, au lieu de tourner en rond sur la bibliothèque. */
+async function sériesModifiées(depuis){
+  const l = Object.values(DB.shows).filter(sh => !sh.archive && sh.userStatus !== "dropped");
+  if(!l.length) return { l:[], aFaire:[] };
+  const upd = await net.get(API + "/updates/shows?since=" + (depuis || "week"));
+  if(!upd) return { l, aFaire:null };
+  const aFaire = l
+    .filter(sh => upd[sh.id] && upd[sh.id] * 1000 > (sh.lastFetched || 0))
+    .sort((a, b) => upd[b.id] - upd[a.id]);
+  return { l, aFaire };
+}
+
 async function majAuto(){
-  const seuil = Date.now() - 3 * 86400000;
-  const l = Object.values(DB.shows)
-    .filter(sh => sh.status === "Running" && sh.userStatus !== "dropped" && (sh.lastFetched || 0) < seuil)
-    .slice(0, 6);
-  for(const s of l){
-    try{ const sh = await fetchShow(s.id); if(sh) ajouterShow(sh, s.userStatus); }catch(e){}
+  try{
+    const { aFaire } = await sériesModifiées("week");
+    if(!aFaire || !aFaire.length) return;
+    const lot = aFaire.slice(0, 25);
+    for(const s of lot){
+      try{ const sh = await fetchShow(s.id); if(sh) ajouterShow(sh, s.userStatus); }catch(e){}
+    }
+    sauver();
+    if(!state.detail && !state.detailF && !state.cherche) render();
+  }catch(e){}
+}
+
+/* Version manuelle : fenêtre plus large, journal, et pas de plafond. */
+async function actualiserMaj(){
+  impr.ouvrir("maj");
+  impr.dire("Lecture des modifications du catalogue…");
+  let res;
+  try{ res = await sériesModifiées("month"); }
+  catch(e){ impr.dire("Catalogue injoignable : " + (e && e.message || e)); return impr.fermer(); }
+  if(!res.l.length){ impr.dire("Aucune série active à vérifier."); return impr.fermer(); }
+  if(!res.aFaire){
+    impr.dire("Le catalogue n'a pas répondu. Réessaie plus tard, ou force une réactualisation complète.");
+    return impr.fermer();
   }
-  if(l.length){ sauver(); if(!state.detail && !state.cherche) render(); }
+  impr.dire(res.l.length + " séries suivies, " + res.aFaire.length + " modifiées depuis un mois.");
+  if(!res.aFaire.length){
+    impr.dire("Tout est déjà à jour — rien à retélécharger.");
+    return impr.fermer();
+  }
+  let ok = 0;
+  for(let i = 0; i < res.aFaire.length; i++){
+    if(state.annuler){ impr.dire("\nInterrompu."); break; }
+    impr.avance(i + 1, res.aFaire.length, (res.aFaire.length - i) * 0.55);
+    const s = res.aFaire[i];
+    try{
+      const sh = await fetchShow(s.id);
+      if(sh){ ajouterShow(sh, s.userStatus); ok++; impr.dire("✓ " + sh.name); }
+      else impr.dire("✗ " + s.name);
+    }catch(e){ impr.dire("✗ " + s.name); }
+  }
+  impr.avance(res.aFaire.length, res.aFaire.length);
+  impr.dire("\n" + ok + " séries actualisées sur " + res.l.length + " suivies.");
+  impr.fermer(); render(); toast(ok + " séries actualisées");
 }
 
 /* ---------- démarrage ---------- */
