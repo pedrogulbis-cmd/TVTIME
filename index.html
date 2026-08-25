@@ -169,6 +169,8 @@ nav.tabs{
   border:1px solid var(--trait);background:var(--carte2);color:var(--gris)}
 .op:active{transform:scale(.92)}
 .op.on{color:var(--signal);border-color:var(--signalB);background:var(--signalF)}
+.op.vu{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
+.ops{gap:6px}
 .op.sup:active{color:var(--rouge);border-color:var(--rougeB)}
 .card.arch{opacity:.5}
 .card.arch .poster{filter:grayscale(1)}
@@ -305,9 +307,18 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.8.2";
-const SCHEMA  = 2;
+const VERSION = "1.9.0";
+const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.9.0", d:"2026-08-24", t:"Films", l:[
+    "Nouvel onglet Films, bâti sur la même présentation que Séries : recherche, filtres, tris, archivage, corbeille.",
+    "Un film garde la liste datée de ses visionnages, avec bouton +1 pour les revoyures.",
+    "Recherche de films par le catalogue iTunes, sans clé ni compte ; une clé TMDb facultative dans les Réglages élargit nettement le catalogue.",
+    "Ma liste devient Séries, passe en première position et s'ouvre par défaut.",
+    "L'onglet À suivre disparaît : son compteur d'épisodes en attente s'affiche désormais sur l'onglet Séries.",
+    "Les statistiques distinguent séries et films.",
+    "Les films sont inclus dans les exports et les sauvegardes."
+  ]},
   { v:"1.8.2", d:"2026-08-24", t:"Retour à la bonne place", l:[
     "Le tri Diffusion reprend la première place dans la rangée de tris.",
     "En revenant d'une fiche où l'on a coché des épisodes, la liste cadre la série concernée là où elle est allée.",
@@ -479,7 +490,7 @@ const net = (() => {
    Les écritures sont granulaires : cocher un épisode écrit un seul
    enregistrement, pas la bibliothèque entière.
    ============================================================ */
-const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, settings:{ specials:false, hideEnded:false },
+const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, films:{}, settings:{ specials:false, hideEnded:false },
                    meta:{ created:Date.now(), vue:null } };
 DEFAULTS.settings.theme = "sombre";
 DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de diffusion
@@ -488,10 +499,10 @@ let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
 const IDB = (() => {
-  const NOM = "antenne", V = 1;
+  const NOM = "antenne", V = 2;
   let db = null;
   const prom = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-  const stores = ["shows", "watched", "kv"];
+  const stores = ["shows", "watched", "kv", "films"];
   return {
     ouvrir(){
       return new Promise((res, rej) => {
@@ -502,6 +513,7 @@ const IDB = (() => {
           if(!d.objectStoreNames.contains("shows"))   d.createObjectStore("shows", { keyPath:"id" });
           if(!d.objectStoreNames.contains("watched")) d.createObjectStore("watched");
           if(!d.objectStoreNames.contains("kv"))      d.createObjectStore("kv");
+          if(!d.objectStoreNames.contains("films"))   d.createObjectStore("films", { keyPath:"id" });
         };
         r.onsuccess = () => { db = r.result; res(db); };
         r.onerror = () => rej(r.error || new Error("ouverture refusée"));
@@ -510,16 +522,17 @@ const IDB = (() => {
     },
     async tout(){
       const t = db.transaction(stores, "readonly");
-      const [shows, wk, wv, kk, kvv] = await Promise.all([
+      const [shows, wk, wv, kk, kvv, films] = await Promise.all([
         prom(t.objectStore("shows").getAll()),
         prom(t.objectStore("watched").getAllKeys()),
         prom(t.objectStore("watched").getAll()),
         prom(t.objectStore("kv").getAllKeys()),
-        prom(t.objectStore("kv").getAll())
+        prom(t.objectStore("kv").getAll()),
+        prom(t.objectStore("films").getAll())
       ]);
       const watched = {}; wk.forEach((k, i) => { watched[k] = wv[i]; });
       const kv = {};      kk.forEach((k, i) => { kv[k] = kvv[i]; });
-      return { shows, watched, kv };
+      return { shows, watched, kv, films };
     },
     ecrire(lots){
       return new Promise((res, rej) => {
@@ -527,9 +540,11 @@ const IDB = (() => {
         t.oncomplete = () => res();
         t.onerror = () => rej(t.error);
         t.onabort  = () => rej(t.error || new Error("écriture annulée"));
-        const S = t.objectStore("shows"), W = t.objectStore("watched"), K = t.objectStore("kv");
+        const S = t.objectStore("shows"), W = t.objectStore("watched"), K = t.objectStore("kv"), F = t.objectStore("films");
         (lots.shows || []).forEach(sh => S.put(sh));
         (lots.suppr || []).forEach(id => S.delete(Number(id)));
+        (lots.films || []).forEach(fi => F.put(fi));
+        (lots.supprFilms || []).forEach(id => F.delete(String(id)));
         Object.keys(lots.vues || {}).forEach(k => { const v = lots.vues[k]; if(v && v.length) W.put(v, k); else W.delete(k); });
         Object.keys(lots.kv || {}).forEach(k => K.put(lots.kv[k], k));
       });
@@ -545,25 +560,29 @@ const IDB = (() => {
 })();
 
 /* ---------- file d'écriture ---------- */
-const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), kv:false };
+const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), films:new Set(), supprFilms:new Set(), kv:false };
 let _fl;
 function planifier(){ clearTimeout(_fl); _fl = setTimeout(ecouler, 150); }
 async function ecouler(){
   if(!pret) return;
-  if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.kv) return;
-  const lots = { shows:[], suppr:[...sale.suppr], vues:{}, kv:{} };
+  if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.films.size && !sale.supprFilms.size && !sale.kv) return;
+  const lots = { shows:[], suppr:[...sale.suppr], vues:{}, films:[], supprFilms:[...sale.supprFilms], kv:{} };
   sale.shows.forEach(id => { const sh = DB.shows[id]; if(sh) lots.shows.push(sh); });
+  sale.films.forEach(id => { const fi = DB.films[id]; if(fi) lots.films.push(fi); });
   sale.vues.forEach(k => { lots.vues[k] = DB.watched[k] || null; });
   if(sale.kv) lots.kv = { settings:DB.settings, meta:DB.meta, version:SCHEMA };
-  sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sale.kv = false;
+  sale.shows.clear(); sale.suppr.clear(); sale.vues.clear();
+  sale.films.clear(); sale.supprFilms.clear(); sale.kv = false;
   try{ await IDB.ecrire(lots); }
   catch(e){ toast("Enregistrement impossible : " + (e && e.message || e)); }
 }
 function sauver(){ sale.kv = true; planifier(); }
 function sauverShow(sh){ if(sh) sale.shows.add(String(sh.id)); sale.kv = true; planifier(); }
+function sauverFilm(fi){ if(fi) sale.films.add(String(fi.id)); sale.kv = true; planifier(); }
 function salirVues(k){ sale.vues.add(String(k)); planifier(); }
 function toutSalir(){
   Object.keys(DB.shows).forEach(id => sale.shows.add(id));
+  Object.keys(DB.films).forEach(id => sale.films.add(id));
   Object.keys(DB.watched).forEach(k => sale.vues.add(k));
   sale.kv = true; planifier();
 }
@@ -572,6 +591,7 @@ function toutSalir(){
 function assembler(k){
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   (k.shows || []).forEach(sh => { if(!sh.pass) sh.pass = 1; d.shows[sh.id] = sh; });
+  (k.films || []).forEach(fi => { if(!Array.isArray(fi.vu)) fi.vu = fi.vu ? [fi.vu] : []; d.films[fi.id] = fi; });
   Object.keys(k.watched || {}).forEach(key => {
     const v = k.watched[key];
     const a = Array.isArray(v) ? v : (v ? [v] : []);
@@ -739,7 +759,7 @@ function toucher(sh){
 function viser(){
   if(!state.vise) return false;
   const id = state.vise; state.vise = null;
-  const el = document.querySelector('[data-act="open"][data-id="' + id + '"]');
+  const el = document.querySelector('[data-act="open"][data-id="' + id + '"], [data-act="open-f"][data-id="' + CSS.escape(String(id)) + '"]');
   if(!el) return false;
   const carte = el.closest(".card") || el;
   const y = carte.getBoundingClientRect().top + window.scrollY - 100;
@@ -784,6 +804,7 @@ function autoStatut(sh){
 /* ---------- icônes ---------- */
 const ICO = {
   play:'<path d="M5 3.5v17l14-8.5z"/>',
+  film:'<rect x="2.5" y="4.5" width="19" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M7.5 4.5v15M16.5 4.5v15M2.5 12h19M2.5 8.2h5M2.5 15.8h5M16.5 8.2h5M16.5 15.8h5" stroke="currentColor" stroke-width="1.6"/>',
   list:'<path d="M4 6h16M4 12h16M4 18h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>',
   cal :'<rect x="3" y="5" width="18" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   chart:'<path d="M4 20V10M10 20V4M16 20v-7M22 20H2" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/>',
@@ -797,15 +818,16 @@ const ICO = {
 const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' + ICO[k] + '</svg>';
 
 /* ---------- état de navigation ---------- */
-const state = { tab:"upnext", detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
+const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
+                filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series",
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
-                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60, limiteS:60,
+                ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
 const PAGE = 60;
 
 const TABS = [
-  { id:"upnext",  l:"À suivre", i:"play" },
-  { id:"library", l:"Ma liste", i:"list" },
+  { id:"library", l:"Séries",   i:"list" },
+  { id:"films",   l:"Films",    i:"film" },
   { id:"agenda",  l:"Agenda",   i:"cal" },
   { id:"stats",   l:"Stats",    i:"chart" },
   { id:"reglages",l:"Réglages", i:"cog" }
@@ -836,7 +858,8 @@ function render(){
 
 function dessiner(){
   $("#tabs").innerHTML = TABS.map(t => {
-    const n = t.id === "upnext" ? listeASuivre().length : 0;
+    const n = t.id === "library" ? listeASuivre().length
+            : t.id === "films"   ? Object.values(DB.films).filter(f => !f.archive && !nbVuesFilm(f)).length : 0;
     return '<button class="tab tab-wrap ' + (state.tab === t.id ? "on" : "") + '" data-act="tab" data-id="' + t.id + '">' +
       '<span style="position:relative;display:flex">' + svg(t.i, 20) +
       (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + '</span>' : "") + '</span>' +
@@ -848,19 +871,20 @@ function dessiner(){
 
   const v = $("#view");
   if(state.cherche)               v.innerHTML = vueRecherche();
-  else if(state.tab === "upnext")   v.innerHTML = vueASuivre();
+  else if(state.tab === "films")    v.innerHTML = vueFilms();
   else if(state.tab === "library")  v.innerHTML = vueListe();
   else if(state.tab === "agenda")   v.innerHTML = vueAgenda();
   else if(state.tab === "stats")    v.innerHTML = vueStats();
   else                              v.innerHTML = vueReglages();
 
-  $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail]) : "";
-  if(state.detail && state.animer){
+  $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail])
+                        : state.detailF ? vueFicheFilm(DB.films[state.detailF]) : "";
+  if((state.detail || state.detailF) && state.animer){
     const el = document.querySelector(".sheet");
     if(el) el.classList.add("neuve");
     state.animer = false;
   }
-  document.body.style.overflow = state.detail ? "hidden" : "";
+  document.body.style.overflow = (state.detail || state.detailF) ? "hidden" : "";
 }
 
 /* ---------- bandes de diffusion (élément signature) ---------- */
@@ -924,7 +948,7 @@ function carteSerie(sh){
     '</div></div>';
 }
 
-/* ---------- vue : À suivre ---------- */
+/* ---------- séries en attente (sert au compteur de l'onglet) ---------- */
 function listeASuivre(){
   return Object.values(DB.shows)
     .filter(sh => !sh.archive && (sh.userStatus === "watching" || sh.userStatus === "planned"))
@@ -932,50 +956,6 @@ function listeASuivre(){
     .filter(x => x.ep)
     .sort((a, b) => String(b.ep.d).localeCompare(String(a.ep.d)));
 }
-function vueASuivre(){
-  const l = listeASuivre();
-  const rien = Object.keys(DB.shows).length === 0;
-  if(rien) return '<div class="empty" style="padding-top:64px">' +
-    '<h3>Commence ta collection</h3><p>Cherche une série, ajoute-la, coche tes épisodes.<br>Tout reste sur ton téléphone.</p>' +
-    '<button class="btn pri" data-act="go-search">Chercher une série</button></div>';
-  if(!l.length) return '<div class="empty"><h3>Tu es à jour</h3><p>Aucun épisode diffusé en attente.</p>' +
-    '<button class="btn" data-act="tab" data-id="agenda">Voir ce qui arrive</button></div>';
-
-  const seuil = Date.now() - 21 * 86400000;
-  const frais = [], enRetard = [];
-  l.forEach(x => (new Date(x.ep.d + "T12:00:00") < seuil ? enRetard : frais).push(x));
-
-  // On ne dessine qu'un paquet à la fois : au-delà de quelques dizaines de
-  // cartes, chacune recalculant sa grille de diffusion, le rendu devient lourd.
-  const lim = state.limiteS;
-  const fraisV = frais.slice(0, lim);
-  const retardV = enRetard.slice(0, Math.max(0, lim - fraisV.length));
-  const affichees = fraisV.length + retardV.length;
-
-  const bloc = (arr, titre, n) => arr.length ? '<div class="eyebrow">' + titre + ' <b>' + n + '</b></div><div class="stack">' +
-    arr.map(x => carteEpisode(x.sh, x.ep)).join("") + '</div>' : "";
-
-  const suite = l.length > affichees
-    ? '<button class="btn full" style="margin-top:12px" data-act="plus-suivre">Afficher ' +
-      Math.min(PAGE, l.length - affichees) + ' épisodes de plus <span class="mono" style="color:var(--gris)">(' +
-      affichees + '/' + l.length + ')</span></button>' : "";
-
-  return bloc(fraisV, "À regarder", frais.length) + bloc(retardV, "En retard", enRetard.length) + suite;
-}
-function carteEpisode(sh, ep){
-  return '<div class="card" style="display:flex">' +
-    '<button class="row" style="flex:1;min-width:0" data-act="open" data-id="' + sh.id + '">' +
-      affiche(sh) +
-      '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(sh.name) + '</div>' +
-      '<div style="margin-top:5px"><span class="code next">S' + p2(ep.s) + 'E' + p2(ep.n || 0) + '</span></div>' +
-      '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(ep.t || "Épisode") + '</div>' +
-      '<div class="stripmeta"><span>' + relDate(ep.d) + '</span><span>' + (ep.r || sh.runtime || 42) + ' min</span></div>' +
-      '</div></button>' +
-    '<div style="display:grid;place-items:center;padding-right:11px">' +
-      '<button class="check" data-act="tick" data-id="' + sh.id + '" data-ep="' + ep.i + '" aria-label="Marquer vu">' + svg("check", 20) + '</button>' +
-    '</div></div>';
-}
-
 /* ---------- vue : Ma liste ---------- */
 const FILTRES = [
   { id:"all", l:"Toutes" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
@@ -1083,6 +1063,235 @@ function vueListe(){
     '</div>' + corps;
 }
 
+/* ============================================================
+   FILMS
+   Deux sources possibles :
+   — iTunes Search, sans clé ni compte, active d'emblée ;
+   — TMDb, si une clé est renseignée dans les Réglages : catalogue
+     bien plus complet, notamment pour les films anciens ou peu diffusés.
+   Un film garde la liste datée de ses visionnages, comme un épisode.
+   ============================================================ */
+async function jsonLibre(url){
+  const r = await fetch(url, { headers:{ Accept:"application/json" } });
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+const cleTMDB = () => (DB.settings && DB.settings.tmdb || "").trim();
+
+function normFilmITunes(x){
+  return {
+    id:"itunes:" + x.trackId,
+    titre:x.trackName || "Sans titre",
+    annee:x.releaseDate ? String(x.releaseDate).slice(0, 4) : "",
+    affiche:x.artworkUrl100 ? String(x.artworkUrl100).replace(/100x100/, "300x300") : null,
+    duree:x.trackTimeMillis ? Math.round(x.trackTimeMillis / 60000) : null,
+    genres:x.primaryGenreName ? [x.primaryGenreName] : [],
+    resume:x.longDescription || x.shortDescription || "",
+    realisateur:x.artistName || ""
+  };
+}
+function normFilmTMDB(x){
+  return {
+    id:"tmdb:" + x.id,
+    titre:x.title || x.original_title || "Sans titre",
+    annee:x.release_date ? String(x.release_date).slice(0, 4) : "",
+    affiche:x.poster_path ? "https://image.tmdb.org/t/p/w342" + x.poster_path : null,
+    duree:x.runtime || null,
+    genres:(x.genres || []).map(g => g.name),
+    resume:x.overview || "",
+    realisateur:""
+  };
+}
+async function chercherFilms(q){
+  const cle = cleTMDB();
+  if(cle){
+    const d = await jsonLibre("https://api.themoviedb.org/3/search/movie?api_key=" + encodeURIComponent(cle) +
+      "&language=fr-FR&include_adult=false&query=" + encodeURIComponent(q));
+    return (d.results || []).slice(0, 20).map(normFilmTMDB);
+  }
+  const d = await jsonLibre("https://itunes.apple.com/search?media=movie&country=FR&limit=20&term=" + encodeURIComponent(q));
+  return (d.results || []).map(normFilmITunes);
+}
+/* La recherche TMDb ne renvoie ni durée ni genres : on complète à l'ajout. */
+async function completerFilm(f){
+  const cle = cleTMDB();
+  if(!cle || !/^tmdb:/.test(f.id) || f.duree) return f;
+  try{
+    const d = await jsonLibre("https://api.themoviedb.org/3/movie/" + f.id.slice(5) +
+      "?api_key=" + encodeURIComponent(cle) + "&language=fr-FR");
+    return { ...f, ...normFilmTMDB(d) };
+  }catch(e){ return f; }
+}
+
+const vuesFilm = f => Array.isArray(f.vu) ? f.vu : (f.vu ? [f.vu] : []);
+const nbVuesFilm = f => vuesFilm(f).length;
+function ajouterFilm(f, statut){
+  const anc = DB.films[f.id] || {};
+  DB.films[f.id] = {
+    ...f,
+    vu: anc.vu || [],
+    statut: statut || anc.statut || "planned",
+    archive: anc.archive || false,
+    ajoute: anc.ajoute || Date.now(),
+    activite: Date.now()
+  };
+  sauverFilm(DB.films[f.id]);
+  return DB.films[f.id];
+}
+function retirerFilm(id){
+  delete DB.films[id];
+  sale.films.delete(String(id));
+  sale.supprFilms.add(String(id));
+  sauver();
+}
+function marquerFilm(f, on){
+  const v = vuesFilm(f).slice();
+  if(on) v.push(new Date().toISOString());
+  else v.pop();
+  f.vu = v;
+  f.statut = v.length ? "watched" : "planned";
+  f.activite = Date.now();
+  state.vise = f.id;
+  sauverFilm(f);
+}
+function tempsFilms(){
+  return Object.values(DB.films).reduce((t, f) => t + nbVuesFilm(f) * (f.duree || 100), 0);
+}
+
+/* ---------- vue : Films ---------- */
+const FILTRES_F = [
+  { id:"all", l:"Tous" }, { id:"planned", l:"À voir" }, { id:"watched", l:"Vus" },
+  { id:"rewatch", l:"Revus" }, { id:"archived", l:"Archivés" }
+];
+function vueFilms(){
+  const tout = Object.values(DB.films);
+  if(!tout.length)
+    return '<div class="empty" style="padding-top:64px"><h3>Aucun film</h3>' +
+      '<p>Cherche un film, ajoute-le, coche-le quand tu l\'as vu.</p>' +
+      '<button class="btn pri" data-act="go-search">Chercher un film</button></div>';
+
+  let l = tout;
+  const f = state.filtreF;
+  if(f === "archived")      l = l.filter(x => x.archive);
+  else if(f !== "all")      l = l.filter(x => !x.archive);
+  if(f === "planned")       l = l.filter(x => !nbVuesFilm(x));
+  else if(f === "watched")  l = l.filter(x => nbVuesFilm(x) > 0);
+  else if(f === "rewatch")  l = l.filter(x => nbVuesFilm(x) > 1);
+
+  const q = norm(state.qlF).trim();
+  if(q) l = l.filter(x => norm(x.titre).includes(q));
+
+  const t = state.triF;
+  l = l.slice().sort((a, b) =>
+      t === "az"     ? a.titre.localeCompare(b.titre)
+    : t === "annee"  ? String(b.annee).localeCompare(String(a.annee)) || a.titre.localeCompare(b.titre)
+    : t === "duree"  ? (b.duree || 0) - (a.duree || 0)
+    : t === "ajout"  ? (b.ajoute || 0) - (a.ajoute || 0)
+    : (b.activite || 0) - (a.activite || 0) || a.titre.localeCompare(b.titre));
+  l = l.filter(x => !x.archive).concat(l.filter(x => x.archive));
+
+  const barre = '<div style="padding-top:14px"></div><div class="search">' +
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+    '<input id="qlf" type="search" placeholder="Filtrer par titre…" autocomplete="off" value="' + esc(state.qlF) + '">' +
+    (state.qlF ? '<button class="btn sm" data-act="vider-qlf">Effacer</button>' : "") +
+    '<button class="btn sm pri" data-act="go-search">Ajouter</button></div>';
+
+  const chips = '<div class="chips" style="margin-top:10px">' + FILTRES_F.map(x =>
+    '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre-f" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
+
+  const tris = '<div class="chips" style="margin-top:6px">' +
+    [["activite","Reprise"],["ajout","Ajout"],["annee","Sortie"],["az","A → Z"],["duree","Durée"]]
+      .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri-f" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
+
+  const aVoir = l.filter(x => !x.archive && !nbVuesFilm(x));
+  const resteF = aVoir.reduce((x, fi) => x + (fi.duree || 100), 0);
+
+  const vus = l.slice(0, state.limiteF);
+  const corps = l.length
+    ? '<div class="stack">' + vus.map(carteFilm).join("") + '</div>' +
+      (l.length > vus.length
+        ? '<button class="btn full" style="margin-top:12px" data-act="plus-f">Afficher ' +
+          Math.min(PAGE, l.length - vus.length) + ' films de plus <span class="mono" style="color:var(--gris)">(' +
+          vus.length + '/' + l.length + ')</span></button>' : "")
+    : '<div class="empty"><h3>Aucun résultat</h3><p>Aucun film ne correspond à ces critères.</p></div>';
+
+  return barre + chips + tris +
+    '<div class="eyebrow">' + (q ? 'Titres contenant « ' + esc(state.qlF.trim()) + ' »' : (FILTRES_F.find(x => x.id === f) || {}).l) +
+      ' <b>' + l.length + '</b>' +
+      (resteF ? '<span style="color:var(--signal);letter-spacing:.04em">à voir ' + dureeLongue(resteF) + '</span>' : "") +
+    '</div>' + corps;
+}
+
+function afficheFilm(f){
+  return f.affiche
+    ? '<div class="poster" style="background-image:url(' + esc(f.affiche) + ')"></div>'
+    : '<div class="poster"><div class="ph">' + esc((f.titre || "?")[0].toUpperCase()) + '</div></div>';
+}
+function carteFilm(f){
+  const n = nbVuesFilm(f);
+  const der = n ? String(vuesFilm(f)[n - 1]).slice(0, 10) : null;
+  const meta = [f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ");
+  return '<div class="card serie' + (f.archive ? " arch" : "") + '">' +
+    '<button class="row" style="flex:1;min-width:0" data-act="open-f" data-id="' + esc(f.id) + '">' +
+      afficheFilm(f) +
+      '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
+      '<div class="sub">' + esc(meta) + '</div>' +
+      '<div class="strip" aria-hidden="true">' +
+        (n ? Array.from({ length:Math.min(n, 12) }, () => '<i class="w"></i>').join("") : '<i class="f"></i>') +
+      '</div>' +
+      '<div class="stripmeta"><span>' + (der ? "vu le " + frDate(der) : "pas encore vu") + '</span>' +
+        (n > 1 ? '<span style="color:var(--vu)">↺' + n + '</span>' : "") +
+        (f.duree ? '<span>' + f.duree + ' min</span>' : "") + '</div>' +
+    '</div></button>' +
+    '<div class="ops">' +
+      '<button class="op' + (n ? " vu" : "") + '" data-act="tick-f" data-id="' + esc(f.id) + '" title="' + (n ? "Retirer le dernier visionnage" : "Marquer vu") + '" aria-label="Marquer vu">' + svg("check", 16) + '</button>' +
+      (n ? '<button class="op" data-act="again-f" data-id="' + esc(f.id) + '" title="Compter un visionnage de plus" aria-label="Revu"><span class="mono" style="font-size:11px;font-weight:600">+1</span></button>' : "") +
+      '<button class="op' + (f.archive ? " on" : "") + '" data-act="archiver-f" data-id="' + esc(f.id) + '" title="' + (f.archive ? "Sortir des archives" : "Archiver") + '" aria-label="Archiver">' + svg("archive", 16) + '</button>' +
+      '<button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button>' +
+    '</div></div>';
+}
+
+/* ---------- fiche film ---------- */
+function vueFicheFilm(f){
+  if(!f) return "";
+  const n = nbVuesFilm(f);
+  const meta = [f.annee, f.realisateur, (f.genres || []).join(", "), f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ");
+  return '<div class="sheet">' +
+    '<div class="sheetnav"><button class="iconbtn" data-act="close-sheet" aria-label="Retour">' + svg("back", 19) + '</button>' +
+      '<div style="flex:1;font-family:Archivo;font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.titre) + '</div></div>' +
+    '<div class="hero"><div class="row">' +
+      (f.affiche ? '<div class="poster lg" style="background-image:url(' + esc(f.affiche) + ')"></div>'
+                 : '<div class="poster lg"><div class="ph">' + esc(f.titre[0]) + '</div></div>') +
+      '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(f.titre) + '</h2>' +
+      '<div class="sub" style="-webkit-line-clamp:3;margin-top:6px">' + esc(meta) + '</div>' +
+      (n ? '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:9px">' +
+          dureeLongue(n * (f.duree || 100)) + ' de visionnage · ' + n + ' fois</div>'
+         : '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:9px">pas encore vu</div>') +
+      '</div></div>' +
+      '<div class="grid2" style="margin-top:14px">' +
+        '<button class="btn' + (n ? "" : " pri") + '" data-act="tick-f" data-id="' + esc(f.id) + '">' + svg("check", 16) +
+          (n ? ' Retirer un visionnage' : ' Marquer vu') + '</button>' +
+        '<button class="btn" data-act="again-f" data-id="' + esc(f.id) + '">Revu une fois de plus</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="wrap" style="padding-bottom:60px">' +
+      (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
+      (n ? '<div class="eyebrow">Visionnages <b>' + n + '</b></div><div class="box">' +
+        vuesFilm(f).map((d, k) => '<div class="ep" style="padding:7px 0">' +
+          '<span class="code vu">#' + (k + 1) + '</span>' +
+          '<div class="info"><div class="t">' + frDate(String(d).slice(0, 10)) + '</div></div></div>').join("") +
+        '</div>' : "") +
+      '<div class="eyebrow">Gestion</div>' +
+      '<div class="grid2">' +
+        '<button class="btn' + (f.archive ? " pri" : "") + '" data-act="archiver-f" data-id="' + esc(f.id) + '">' +
+          svg("archive", 16) + (f.archive ? " Sortir des archives" : " Archiver") + '</button>' +
+        '<span></span>' +
+      '</div>' +
+      '<button class="btn dgr full" style="margin-top:9px" data-act="supprimer-f" data-id="' + esc(f.id) + '">' +
+        svg("poubelle", 16) + ' Retirer le film</button>' +
+    '</div></div>';
+}
+
 /* ---------- vue : Agenda ---------- */
 function vueAgenda(){
   const out = [];
@@ -1121,7 +1330,8 @@ function vueAgenda(){
 /* ---------- vue : Stats ---------- */
 function vueStats(){
   const shows = Object.values(DB.shows);
-  if(!shows.length) return '<div class="empty" style="padding-top:60px"><h3>Pas encore de statistiques</h3>' +
+  if(!shows.length && !Object.keys(DB.films).length)
+    return '<div class="empty" style="padding-top:60px"><h3>Pas encore de statistiques</h3>' +
     '<p>Elles apparaîtront dès tes premiers épisodes cochés.</p></div>';
 
   let mins = 0, total = 0, distincts = 0;
@@ -1167,7 +1377,17 @@ function vueStats(){
   const genres = Object.entries(g).sort((a, b) => b[1] - a[1]).slice(0, 10)
     .map(([k, v]) => '<span class="chip">' + esc(k) + ' <b class="mono" style="color:var(--signal)">' + v + '</b></span>').join("");
 
-  return '<div class="eyebrow">Bilan</div><div class="grid2">' + cartes + '</div>' +
+  const films = Object.values(DB.films);
+  const fVus = films.reduce((t, f) => t + nbVuesFilm(f), 0);
+  const fDistincts = films.filter(f => nbVuesFilm(f)).length;
+  const blocFilms = films.length
+    ? '<div class="eyebrow">Films</div><div class="grid2">' +
+      [[fVus, "visionnages"], [dureeLongue(tempsFilms()), "temps d\'écran"],
+       [fDistincts + " / " + films.length, "vus / suivis"], [fVus - fDistincts, "revisionnages"]]
+        .map(([x, l]) => '<div class="stat"><div class="n">' + esc(x) + '</div><div class="l">' + l + '</div></div>').join("") +
+      '</div>' : "";
+
+  return '<div class="eyebrow">Séries</div><div class="grid2">' + cartes + '</div>' + blocFilms +
     '<div class="eyebrow">Activité sur 12 mois</div><div class="box">' + spark + '</div>' +
     (top ? '<div class="eyebrow">Temps par série</div><div class="box">' + top + '</div>' : "") +
     (genres ? '<div class="eyebrow">Genres</div><div class="chips" style="flex-wrap:wrap">' + genres + '</div>' : "");
@@ -1175,6 +1395,7 @@ function vueStats(){
 
 /* ---------- vue : Recherche ---------- */
 function vueRecherche(){
+  if(state.cibleRecherche === "films") return vueRechercheFilms();
   const res = state.res.map(sh => {
     const dedans = !!DB.shows[sh.id];
     return '<div class="card" style="display:flex">' +
@@ -1195,6 +1416,31 @@ function vueRecherche(){
     (state.res.length ? '<div class="eyebrow">Résultats <b>' + state.res.length + '</b></div><div class="stack">' + res + '</div>'
       : state.q.length > 1 ? '<div class="empty"><p>Aucune série trouvée. Essaie le titre original en anglais.</p></div>'
       : '<div class="empty"><p>Tape un titre pour chercher dans le catalogue TVmaze.</p></div>');
+}
+
+function vueRechercheFilms(){
+  const res = state.resF.map(f => {
+    const dedans = !!DB.films[f.id];
+    return '<div class="card" style="display:flex">' +
+      '<div class="row" style="flex:1;min-width:0">' + afficheFilm(f) +
+      '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
+      '<div class="sub">' + esc([f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
+      (f.resume ? '<div class="sub" style="-webkit-line-clamp:2;margin-top:4px">' + esc(f.resume) + '</div>' : "") +
+      '</div></div>' +
+      '<div style="display:grid;place-items:center;padding-right:11px">' +
+        '<button class="check ' + (dedans ? "on" : "") + '" data-act="add-f" data-id="' + esc(f.id) + '" aria-label="Ajouter">' +
+        (dedans ? svg("check", 20) : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>') +
+        '</button></div></div>';
+  }).join("");
+
+  return '<div style="padding-top:14px"></div>' +
+    '<div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
+    '<input id="q" type="search" placeholder="Titre du film…" autocomplete="off" value="' + esc(state.q) + '">' +
+    '<button class="btn sm" data-act="close-search">Fermer</button></div>' +
+    (state.resF.length ? '<div class="eyebrow">Résultats <b>' + state.resF.length + '</b></div><div class="stack">' + res + '</div>'
+      : state.q.length > 1 ? '<div class="empty"><p>Aucun film trouvé.' +
+          (cleTMDB() ? "" : " Le catalogue iTunes couvre mal les films anciens ou confidentiels — une clé TMDb dans les Réglages élargit beaucoup la recherche.") + '</p></div>'
+      : '<div class="empty"><p>Tape un titre pour chercher un film.</p></div>');
 }
 
 /* ---------- vue : fiche série ---------- */
@@ -1285,6 +1531,7 @@ function vueFiche(sh){
 /* ---------- vue : Réglages ---------- */
 function vueReglages(){
   const n = Object.keys(DB.shows).length;
+  const nf = Object.keys(DB.films).length;
   const e = Object.values(DB.watched).reduce((t, v) => t + (Array.isArray(v) ? v.length : 1), 0);
   return '<div class="eyebrow">Sauvegarde</div>' +
   '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, épisodes vus, statuts. Garde-la, c\'est ton seul filet.</p>' +
@@ -1343,9 +1590,18 @@ function vueReglages(){
       '<button class="tg ' + (DB.settings.specials ? "on" : "") + '" data-act="tg" data-k="specials" role="switch" aria-checked="' + !!DB.settings.specials + '"></button></div>' +
   '</div>' +
 
+  '<div class="eyebrow">Source des films</div>' +
+  '<div class="box"><h3>Clé TMDb</h3>' +
+    '<p class="note">Sans clé, la recherche de films passe par le catalogue iTunes : rien à configurer, mais la couverture des films anciens ou confidentiels est inégale, et les résumés sont parfois absents.</p>' +
+    '<p class="note" style="margin-top:7px">Une clé TMDb gratuite (themoviedb.org, section API de ton compte) donne un catalogue nettement plus complet, en français, avec affiches et synopsis. Elle reste dans ce navigateur.</p>' +
+    '<div class="search" style="margin-top:11px"><input id="cle-tmdb" type="text" placeholder="Clé API TMDb (facultatif)" ' +
+      'autocomplete="off" spellcheck="false" value="' + esc(DB.settings.tmdb || "") + '"></div>' +
+    '<div class="mono" style="font-size:11px;color:' + (cleTMDB() ? "var(--vu)" : "var(--gris)") + ';margin-top:8px">' +
+      (cleTMDB() ? "Source active : TMDb" : "Source active : iTunes") + '</div></div>' +
+
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
-      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + '</div><div class="l">séries</div></div>' +
+      '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + ' / ' + nf + '</div><div class="l">séries / films</div></div>' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">visionnages</div></div>' +
     '</div>' +
     '<p class="note" style="margin-top:11px">' +
@@ -1381,7 +1637,7 @@ function vueReglages(){
   '<div class="eyebrow">Repartir de zéro</div>' +
   '<div class="box" style="border-color:var(--rougeB)">' +
     '<h3 style="color:var(--rouge)">Purger toutes les données</h3>' +
-    '<p class="note">Efface les ' + n + ' séries, les ' + e + ' visionnages et les réglages, puis remet Antenne dans son état d\'origine. ' +
+    '<p class="note">Efface les ' + n + ' séries, les ' + nf + ' films, les ' + e + ' visionnages et les réglages, puis remet Antenne dans son état d\'origine. ' +
     'Le thème et le journal des versions sont conservés. Utile pour rejouer un import depuis zéro.</p>' +
     '<p class="note" style="margin-top:7px;color:var(--rouge)">Rien n\'est récupérable ensuite. Exporte d\'abord si tu tiens à quelque chose.</p>' +
     '<button class="btn full dgr" style="margin-top:11px" data-act="wipe">' + svg("poubelle", 16) + ' Purger toutes les données</button>' +
@@ -1400,7 +1656,7 @@ document.addEventListener("click", async ev => {
 
   if(act === "tab"){
     state.cherche = false;
-    if(state.tab !== id){ state.limiteS = PAGE; state.limite = PAGE; state.vise = null; }
+    if(state.tab !== id){ state.limite = PAGE; state.limiteF = PAGE; state.vise = null; }
     state.tab = id; render(); window.scrollTo(0, 0); return;
   }
   if(act === "changelog"){
@@ -1409,8 +1665,12 @@ document.addEventListener("click", async ev => {
     setTimeout(() => { const a = $("#anc-journal"); if(a) a.scrollIntoView({ behavior:"smooth", block:"start" }); }, 60);
     return;
   }
-  if(act === "go-search"){ state.cherche = true; render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return; }
-  if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; render(); return; }
+  if(act === "go-search"){
+    state.cherche = true;
+    state.cibleRecherche = state.tab === "films" ? "films" : "series";
+    render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return;
+  }
+  if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; state.resF = []; render(); return; }
   if(act === "filtre"){
     state.filtre = id; state.limite = PAGE;
     DB.settings.filtre = id; sauver();   // le choix est retenu d'une session à l'autre
@@ -1431,9 +1691,47 @@ document.addEventListener("click", async ev => {
   }
   if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
   if(act === "plus"){ state.limite += PAGE; render(); return; }
-  if(act === "plus-suivre"){ state.limiteS += PAGE; render(); return; }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
+  if(act === "open-f"){ ouvrirFicheFilm(id); return; }
+  if(act === "add-f"){
+    if(DB.films[id]){ retirerFilm(id); toast("Retiré de tes films"); render(); return; }
+    const brut = state.resF.find(x => x.id === id);
+    if(!brut) return;
+    el.innerHTML = "…";
+    const f = await completerFilm(brut);
+    ajouterFilm(f, "planned");
+    toast("« " + f.titre + " » ajouté");
+    render(); return;
+  }
+  if(act === "tick-f"){
+    const f = DB.films[id]; if(!f) return;
+    marquerFilm(f, !nbVuesFilm(f));
+    render(); return;
+  }
+  if(act === "again-f"){
+    const f = DB.films[id]; if(!f) return;
+    const v = vuesFilm(f).slice(); v.push(new Date().toISOString());
+    f.vu = v; f.statut = "watched"; f.activite = Date.now(); state.vise = f.id;
+    sauverFilm(f); toast("Visionnage n°" + v.length + " compté"); render(); return;
+  }
+  if(act === "archiver-f"){
+    const f = DB.films[id]; if(!f) return;
+    f.archive = !f.archive; sauverFilm(f); render();
+    toast(f.archive ? "« " + f.titre + " » archivé" : "« " + f.titre + " » sorti des archives"); return;
+  }
+  if(act === "supprimer-f"){
+    const f = DB.films[id]; if(!f) return;
+    if(!confirm("Retirer « " + f.titre + " » de tes films ?\n\nSes visionnages seront effacés. Pour le garder sans le suivre, archive-le plutôt.")) return;
+    retirerFilm(id);
+    if(state.detailF === id){ state.detailF = null; render(); history.back(); }
+    else render();
+    toast("Film retiré"); return;
+  }
+  if(act === "filtre-f"){ state.filtreF = id; state.limiteF = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "tri-f"){ state.triF = id; state.limiteF = PAGE; render(); window.scrollTo(0, 0); return; }
+  if(act === "vider-qlf"){ state.qlF = ""; state.limiteF = PAGE; render(); return; }
+  if(act === "plus-f"){ state.limiteF += PAGE; render(); return; }
   if(act === "archiver"){
     const sh = DB.shows[+id]; if(!sh) return;
     sh.archive = !sh.archive; sauverShow(sh); render();
@@ -1547,7 +1845,8 @@ document.addEventListener("click", async ev => {
     localStorage.removeItem(LS);
     DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION; DB.settings.theme = themeActuel();
     sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
-    state.filtre = DEFAULTS.settings.filtre; state.tri = DEFAULTS.settings.tri; state.ql = state.genre = state.plateforme = state.diffusion = "";
+    state.filtre = DEFAULTS.settings.filtre; state.tri = DEFAULTS.settings.tri;
+    state.filtreF = "all"; state.triF = "activite"; state.qlF = ""; state.limiteF = PAGE; state.detailF = null; state.ql = state.genre = state.plateforme = state.diffusion = "";
     state.limite = PAGE; state.detail = null;
     render(); majQuota(); toast("Données purgées"); return;
   }
@@ -1559,6 +1858,12 @@ function saisonCourante(sh){
   const ss = [...new Set(eps.map(e => e.s))].sort((a, b) => a - b);
   state.saisons = new Set([nx ? nx.s : (ss.length ? ss[ss.length - 1] : 1)]);
 }
+function ouvrirFicheFilm(id){
+  state.retour = window.scrollY;
+  state.detailF = id; state.animer = true;
+  history.pushState({ film:id }, "", "#f" + encodeURIComponent(id));
+  render();
+}
 function ouvrirFiche(id){
   state.retour = window.scrollY;
   state.detail = id; state.animer = true;
@@ -1567,11 +1872,11 @@ function ouvrirFiche(id){
   render();
 }
 window.addEventListener("popstate", () => {
-  if(state.detail){
-    state.detail = null;
+  if(state.detail || state.detailF){
+    state.detail = null; state.detailF = null;
     render();
-    // Retour sur la liste : on cadre la série qu'on vient de modifier.
-    if(!(state.tab === "library" && viser())) window.scrollTo(0, state.retour || 0);
+    // Retour sur la liste : on cadre l'élément qu'on vient de modifier.
+    if(!((state.tab === "library" || state.tab === "films") && viser())) window.scrollTo(0, state.retour || 0);
   }
 });
 
@@ -1590,6 +1895,27 @@ document.addEventListener("toggle", ev => {
 }, true);
 
 /* ---------- recherche live ---------- */
+let _cle;
+document.addEventListener("input", ev => {
+  if(ev.target.id !== "cle-tmdb") return;
+  const v = ev.target.value.trim();
+  clearTimeout(_cle);
+  _cle = setTimeout(() => { DB.settings.tmdb = v; sauver(); toast(v ? "Source des films : TMDb" : "Source des films : iTunes"); }, 600);
+});
+
+let _qlf;
+document.addEventListener("input", ev => {
+  if(ev.target.id !== "qlf") return;
+  state.qlF = ev.target.value; state.limiteF = PAGE;
+  clearTimeout(_qlf);
+  _qlf = setTimeout(() => {
+    const pos = ev.target.selectionStart;
+    render();
+    const el = $("#qlf");
+    if(el){ el.focus(); try{ el.setSelectionRange(pos, pos); }catch(e){} }
+  }, 180);
+});
+
 let _ql;
 document.addEventListener("input", ev => {
   if(ev.target.id !== "ql") return;
@@ -1610,7 +1936,12 @@ document.addEventListener("input", ev => {
   clearTimeout(_q);
   _q = setTimeout(async () => {
     const q = state.q.trim();
-    if(q.length < 2){ state.res = []; return majResultats(); }
+    if(q.length < 2){ state.res = []; state.resF = []; return majResultats(); }
+    if(state.cibleRecherche === "films"){
+      try{ state.resF = await chercherFilms(q); }
+      catch(e){ toast("Recherche de films indisponible" + (cleTMDB() ? " — vérifie ta clé TMDb" : "")); state.resF = []; }
+      return majResultats();
+    }
     try{
       const r = await net.get(API + "/search/shows?q=" + encodeURIComponent(q));
       state.res = (r || []).map(x => normShow(x.show)).slice(0, 20);
@@ -2163,6 +2494,8 @@ document.addEventListener("change", ev => {
         }
         let ns = 0, ne = 0;
         Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = { pass:1, ...v }; ns++; } });
+        let nf = 0;
+        Object.entries(d.films || {}).forEach(([k, v]) => { if(!DB.films[k]){ DB.films[k] = v; nf++; } });
         Object.entries(d.watched || {}).forEach(([k, v]) => {
           const inc = Array.isArray(v) ? v : (v ? [v] : []);
           const cur = Array.isArray(DB.watched[k]) ? DB.watched[k] : (DB.watched[k] ? [DB.watched[k]] : []);
@@ -2172,7 +2505,7 @@ document.addEventListener("change", ev => {
         Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
         Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
         toutSalir(); render();
-        toast(ns + " séries et " + ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
+        toast(ns + " séries, " + nf + " films et " + ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
       }catch(e){ toast("Fichier illisible : " + e.message); }
     };
     rd.readAsText(f);
