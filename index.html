@@ -397,9 +397,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.17.1";
+const VERSION = "1.18.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.18.0", d:"2026-08-25", t:"Compte à rebours et rattrapage", l:[
+    "L'Agenda, la fiche et les cartes affichent le temps restant avant diffusion plutôt qu'une date seule.",
+    "L'horodatage complet publié par TVmaze est désormais conservé pour les épisodes à venir : le décompte tient compte du fuseau, une série diffusée à 22 h heure de l'Est arrive à 4 h du matin ici.",
+    "Les séries déjà en bibliothèque n'auront cette précision qu'après réactualisation ; d'ici là le décompte reste au jour près.",
+    "L'affichage se rafraîchit chaque minute, uniquement sur l'Agenda et la fiche ouverte, onglet au premier plan.",
+    "Bouton « Tout rattraper » dans la fiche, avec le nombre d'épisodes concernés et une confirmation qui annonce le pic de la journée dans les statistiques.",
+    "Le rattrapage propose « Annuler » pendant quelques secondes."
+  ]},
   { v:"1.17.1", d:"2026-08-25", t:"Correctif du dépliage des années", l:[
     "Déplier une année ne fige plus l'application : le rendu déclenché à l'ouverture recréait le bloc, ce qui relançait l'ouverture, en boucle.",
     "Le contenu de chaque année est désormais présent dès l'affichage, comme pour les saisons d'une série.",
@@ -605,6 +613,21 @@ function frDate(iso){
   const d = new Date(iso + "T12:00:00");
   if(isNaN(d)) return iso;
   return JOURS[d.getDay()] + " " + d.getDate() + " " + MOIS[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "");
+}
+/* Compte à rebours avant diffusion. Précis à l'heure quand TVmaze a fourni
+   l'horodatage complet, sinon on retombe sur le jour. Un épisode américain
+   diffusé à 22 h heure de l'Est sort à 4 h du matin ici : le fuseau compte. */
+function compteRebours(ep){
+  if(!ep) return null;
+  const t = ep.a ? Date.parse(ep.a) : (ep.d ? Date.parse(ep.d + "T12:00:00") : NaN);
+  if(isNaN(t)) return null;
+  const ms = t - Date.now();
+  if(ms <= 0) return null;
+  if(!ep.a) return { txt:relDate(ep.d), precis:false };
+  const j = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000);
+  return { precis:true, txt: j >= 1 ? "dans " + j + " j " + h + " h"
+    : h >= 1 ? "dans " + h + " h " + p2(m)
+    : "dans " + m + " min" };
 }
 function relDate(iso){
   if(!iso) return "date inconnue";
@@ -839,9 +862,13 @@ function normShow(s){
   };
 }
 function normEps(list){
+  const auj = todayISO();
   return (list || []).map(e => ({
     i:e.id, s:e.season == null ? 0 : e.season, n:e.number,
     t:e.name || "", d:e.airdate || null, r:e.runtime || null,
+    // Horodatage complet gardé pour les seuls épisodes à venir : c'est le seul
+    // cas où l'heure et le fuseau servent, et cela n'alourdit pas la base.
+    a:(e.airdate && e.airdate >= auj && e.airstamp) ? e.airstamp : undefined,
     sp:(e.type && e.type !== "regular") || e.number == null ? 1 : 0
   })).sort((a, b) => a.s - b.s || (a.n ?? 999) - (b.n ?? 999) || String(a.d).localeCompare(String(b.d)));
 }
@@ -897,6 +924,7 @@ function avancement(sh){
   return { total:eps.length, aired:air.length, watched:w.length,
            pct: air.length ? Math.round(w.filter(diffuse).length / air.length * 100) : 0 };
 }
+function aRattraper(sh){ return epsOf(sh).filter(e => diffuse(e) && !vu(e, sh)); }
 function prochainAVoir(sh){ return epsOf(sh).find(e => diffuse(e) && !vu(e, sh)) || null; }
 /* TVmaze ne distingue pas « annulée » de « terminée » : les deux sont Ended.
    On rend donc l'information telle qu'elle est publiée, sans l'inventer. */
@@ -1170,7 +1198,7 @@ function carteSerie(sh){
   const pp = etatCourt(sh) + " " + (passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "");
   let ligne;
   if(nx) ligne = pp + esc(nx.t || "Épisode sans titre");
-  else if(up) ligne = pp + 'retour ' + relDate(up.d);
+  else if(up) ligne = pp + 'retour ' + ((compteRebours(up) || {}).txt || relDate(up.d));
   else if(a.total && a.watched === a.total) ligne = pp + 'tout vu';
   else ligne = pp + 'à jour';
   return '<div class="card serie' + (sh.archive ? " arch" : "") + '">' +
@@ -1802,9 +1830,11 @@ function vueAgenda(){
       let h = "";
       if(x.e.d !== jour){ jour = x.e.d;
         h = '<div class="eyebrow" style="margin:14px 0 8px">' + (x.e.d === t ? "Aujourd'hui · " : "") + frDate(x.e.d) + '</div>'; }
+      const cr = compteRebours(x.e);
       return h + '<button class="card row" data-act="open" data-id="' + x.sh.id + '">' + affiche(x.sh) +
         '<div class="info"><div class="title" style="-webkit-line-clamp:1">' + esc(x.sh.name) + '</div>' +
-        '<div style="margin-top:5px"><span class="code">S' + p2(x.e.s) + 'E' + p2(x.e.n || 0) + '</span></div>' +
+        '<div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px"><span class="code">S' + p2(x.e.s) + 'E' + p2(x.e.n || 0) + '</span>' +
+        (cr ? '<span class="code ' + (cr.precis ? "next" : "") + '">' + esc(cr.txt) + '</span>' : "") + '</div>' +
         '<div class="sub" style="-webkit-line-clamp:1;margin-top:5px">' + esc(x.e.t || "Épisode") + '</div></div></button>';
     }).join("");
     return '<div class="eyebrow">' + titre + ' <b>' + arr.length + '</b></div><div class="stack">' + lignes + '</div>';
@@ -2118,8 +2148,18 @@ function vueFiche(sh){
       (projection(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(projection(sh).texte) + '</div>' : "") +
       '</div></div>' +
       (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
-        svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>'
-        : up ? '<div class="box" style="margin-top:14px;text-align:center;font-size:13px">Prochain épisode <span class="code next">S' + p2(up.s) + 'E' + p2(up.n || 0) + '</span> ' + relDate(up.d) + '</div>'
+        svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>' +
+        (aRattraper(sh).length > 1 ? '<button class="btn full" style="margin-top:9px" data-act="rattraper" data-id="' + sh.id + '">' +
+          'Tout rattraper — ' + aRattraper(sh).length + ' épisodes</button>' : "")
+        : up ? (function(){
+            const cr = compteRebours(up);
+            return '<div class="box" style="margin-top:14px;text-align:center;font-size:13px">Prochain épisode ' +
+              '<span class="code next">S' + p2(up.s) + 'E' + p2(up.n || 0) + '</span> ' +
+              (cr ? cr.txt : relDate(up.d)) +
+              (cr && cr.precis ? '<div class="mono" style="font-size:10.5px;color:var(--gris);margin-top:4px">' +
+                frDate(up.d) + ' à ' + new Date(up.a).toLocaleTimeString("fr-FR", { hour:"2-digit", minute:"2-digit" }) + ' chez toi</div>' : "") +
+              '</div>';
+          })()
         : '<div class="box" style="margin-top:14px;text-align:center;font-size:13px;color:var(--gris)">Aucun épisode en attente</div>') +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
@@ -2561,7 +2601,7 @@ document.addEventListener("click", async ev => {
     return;
   }
   if(act === "annuler-suppr"){
-    if(!corbeille) return fermerToast();
+    if(!corbeille || (corbeille.type !== "serie" && corbeille.type !== "film")) return fermerToast();
     if(corbeille.type === "serie"){
       const sh = corbeille.objet;
       DB.shows[sh.id] = sh;
@@ -2677,6 +2717,31 @@ document.addEventListener("click", async ev => {
   if(act === "remove"){
     if(!confirm("Retirer « " + DB.shows[+id].name + " » et ses épisodes cochés ?")) return;
     retirerShow(+id); state.detail = null; render(); history.back(); toast("Série retirée"); return;
+  }
+  if(act === "rattraper"){
+    const sh = DB.shows[+id]; if(!sh) return;
+    const l = aRattraper(sh);
+    if(!l.length) return toast("Rien à rattraper");
+    if(!confirm(l.length + " épisodes seront marqués vus à la date d'aujourd'hui.\n\n" +
+      "Ta carte d'activité affichera donc " + l.length + " visionnages sur la journée. Continuer ?")) return;
+    corbeille = { type:"rattrapage", objet:sh, ids:l.map(e => e.i) };
+    l.forEach(e => marquer(e, sh, true));
+    toucher(sh); autoStatut(sh); sauverShow(sh);
+    state.saisons = null; saisonCourante(sh); render();
+    toast(l.length + " épisodes rattrapés", "annuler-rattrapage");
+    return;
+  }
+  if(act === "annuler-rattrapage"){
+    if(!corbeille || corbeille.type !== "rattrapage") return fermerToast();
+    const sh = corbeille.objet;
+    corbeille.ids.forEach(i2 => {
+      const e = (sh.eps || []).find(x => x.i === i2);
+      if(e) marquer(e, sh, false);
+    });
+    autoStatut(sh); sauverShow(sh); corbeille = null;
+    saisonCourante(sh); render();
+    toast("Rattrapage annulé");
+    return;
   }
   if(act === "rewatch"){
     const sh = DB.shows[+id];
@@ -3713,6 +3778,14 @@ async function demarrer(){
   majQuota();
   setTimeout(majAuto, 2500);
 }
+
+// Les comptes à rebours vieillissent : on redessine une fois par minute,
+// et seulement là où ils s'affichent, onglet au premier plan.
+setInterval(() => {
+  if(!pret || document.visibilityState !== "visible") return;
+  if(state.cherche || state.tirage || state.detailF) return;
+  if(state.tab === "agenda" || state.detail) render();
+}, 60000);
 
 // Écriture immédiate quand l'onglet passe en arrière-plan ou se ferme.
 document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") ecouler(); });
