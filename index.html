@@ -190,6 +190,11 @@ nav.tabs{
 .btn.full{width:100%}
 .btn.sm{padding:7px 11px;font-size:12.5px;border-radius:8px}
 .chips{display:flex;gap:7px;overflow-x:auto;padding:2px 0 4px;scrollbar-width:none;-ms-overflow-style:none}
+@media(hover:hover) and (pointer:fine){
+  .chips{cursor:grab}
+  .chips.tire{cursor:grabbing;user-select:none}
+  .chips .chip{cursor:pointer}
+}
 .chips::-webkit-scrollbar{display:none}
 .chip{white-space:nowrap;padding:6px 12px;border-radius:20px;background:var(--carte);
   border:1px solid var(--trait);color:var(--gris);font-size:12.5px;font-weight:500}
@@ -202,6 +207,8 @@ nav.tabs{
 .op:active{transform:scale(.92)}
 .op.on{color:var(--signal);border-color:var(--signalB);background:var(--signalF)}
 .op.vu{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
+.op.fa{color:var(--or);border-color:var(--or)}
+.op[data-act^="favori"]{font-size:15px;line-height:1}
 .ops{gap:6px;align-items:stretch}
 .opsrow{display:flex;gap:6px;justify-content:flex-end}
 /* Bouton « épisode suivant » : orange d'action, jamais vert — le vert est
@@ -384,9 +391,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.15.0";
+const VERSION = "1.16.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.16.0", d:"2026-08-25", t:"Correctifs bureau et filtres films", l:[
+    "Les rangées de filtres et d'années se font glisser à la souris, et défilent à la molette. Elles ne réagissaient qu'au doigt.",
+    "Un déplacement n'est plus interprété comme un clic sur la puce survolée.",
+    "L'onglet Films gagne un vrai panneau de filtres : genre, décennie de sortie, durée. Le bouton Ajouter, qui prêtait à confusion, laisse la place à Filtres — l'ajout passe par la loupe de l'entête.",
+    "Dans les listes, le bouton Archiver cède sa place à l'étoile Favori, d'un usage bien plus fréquent. L'archivage reste dans la fiche."
+  ]},
   { v:"1.15.0", d:"2026-08-25", t:"Favoris et tirage au sort", l:[
     "Une étoile dans chaque fiche, série comme film, et une pastille dorée en coin d'affiche dans les listes.",
     "Filtre Favoris en tête des rangées de filtres, des deux côtés.",
@@ -1016,6 +1029,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
                 anStats:"", fAnnee:"", fReste:"", doublons:null, tirage:null,
+                panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"",
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
                 ql:"", genre:"", plateforme:"", diffusion:"", panneau:false, limite:60,
                 quota:null, durable:false };
@@ -1146,9 +1160,9 @@ function carteSerie(sh){
         'title="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu" aria-label="Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu">' +
         svg("check", 14) + '<span>S' + p2(nx.s) + 'E' + p2(nx.n || 0) + '</span></button>' : "") +
       '<div class="opsrow">' +
-        '<button class="op' + (sh.archive ? " on" : "") + '" data-act="archiver" data-id="' + sh.id + '" ' +
-          'title="' + (sh.archive ? "Sortir des archives" : "Archiver") + '" aria-label="' + (sh.archive ? "Sortir des archives" : "Archiver") + '">' +
-          svg("archive", 17) + '</button>' +
+        '<button class="op' + (sh.favorite ? " fa" : "") + '" data-act="favori" data-id="' + sh.id + '" ' +
+          'title="' + (sh.favorite ? "Retirer des favoris" : "Mettre en favori") + '" aria-label="Favori">' +
+          (sh.favorite ? "★" : "☆") + '</button>' +
         '<button class="op sup" data-act="supprimer" data-id="' + sh.id + '" title="Retirer de ma liste" aria-label="Retirer de ma liste">' +
           svg("poubelle", 17) + '</button>' +
       '</div>' +
@@ -1506,6 +1520,13 @@ function vueFilms(){
 
   const q = norm(state.qlF).trim();
   if(q) l = l.filter(x => norm(x.titre).includes(q));
+  if(state.fGenreF) l = l.filter(x => (x.genres || []).includes(state.fGenreF));
+  if(state.fAnneeF) l = l.filter(x => x.annee && String(x.annee).slice(0, 3) + "0" === state.fAnneeF);
+  if(state.fDureeF){
+    const seuils = { court:[0, 90], moyen:[90, 120], long:[120, 150], epique:[150, 1e9] };
+    const [mn, mx] = seuils[state.fDureeF] || [0, 1e9];
+    l = l.filter(x => { const d = x.duree || 100; return d >= mn && d < mx; });
+  }
 
   const t = state.triF;
   l = l.slice().sort((a, b) =>
@@ -1516,11 +1537,36 @@ function vueFilms(){
     : (b.activite || 0) - (a.activite || 0) || a.titre.localeCompare(b.titre));
   l = l.filter(x => !x.archive).concat(l.filter(x => x.archive));
 
+  const actifsF = (state.fGenreF ? 1 : 0) + (state.fAnneeF ? 1 : 0) + (state.fDureeF ? 1 : 0);
   const barre = '<div style="padding-top:14px"></div><div class="search">' +
     '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
     '<input id="qlf" type="search" placeholder="Filtrer par titre…" autocomplete="off" value="' + esc(state.qlF) + '">' +
     (state.qlF ? '<button class="btn sm" data-act="vider-qlf">Effacer</button>' : "") +
-    '<button class="btn sm pri" data-act="go-search">Ajouter</button></div>';
+    '<button class="btn sm ' + (state.panneauF || actifsF ? "pri" : "") + '" data-act="panneau-f">Filtres' +
+      (actifsF ? " · " + actifsF : "") + '</button></div>';
+
+  const compteF = extrait => {
+    const m = new Map();
+    tout.forEach(x => extrait(x).forEach(v => { if(v) m.set(v, (m.get(v) || 0) + 1); }));
+    return [...m.entries()].sort((a, b) => b[1] - a[1] || String(a[0]).localeCompare(String(b[0])));
+  };
+  const facetteF = (cle, sel, liste, titre) => liste.length
+    ? '<div class="eyebrow" style="margin:14px 0 8px">' + titre + '</div><div class="chips" style="flex-wrap:wrap">' +
+      liste.slice(0, 24).map(([k, v]) =>
+        '<button class="chip ' + (sel === k ? "on" : "") + '" data-act="' + cle + '" data-id="' + esc(k) + '">' +
+        esc(k) + ' <b class="mono" style="opacity:.6">' + v + '</b></button>').join("") + '</div>' : "";
+
+  const panneauF = state.panneauF ? '<div class="box" style="margin-top:9px">' +
+      facetteF("genre-f", state.fGenreF, compteF(x => x.genres || []), "Genre") +
+      facetteF("annee-f", state.fAnneeF,
+        compteF(x => x.annee ? [String(x.annee).slice(0, 3) + "0"] : []).sort((a, b) => String(b[0]).localeCompare(String(a[0]))),
+        "Décennie de sortie") +
+      '<div class="eyebrow" style="margin:14px 0 8px">Durée</div><div class="chips" style="flex-wrap:wrap">' +
+        [["court","Moins d\'1 h 30"],["moyen","1 h 30 à 2 h"],["long","2 h à 2 h 30"],["epique","Plus de 2 h 30"]].map(([k, lb]) =>
+          '<button class="chip ' + (state.fDureeF === k ? "on" : "") + '" data-act="duree-f" data-id="' + k + '">' + lb + '</button>').join("") +
+      '</div>' +
+      (actifsF ? '<button class="btn full" style="margin-top:14px" data-act="reset-f">Retirer les filtres</button>' : "") +
+    '</div>' : "";
 
   const chips = '<div class="chips" style="margin-top:10px">' + FILTRES_F.map(x =>
     '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre-f" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
@@ -1541,7 +1587,7 @@ function vueFilms(){
           vus.length + '/' + l.length + ')</span></button>' : "")
     : '<div class="empty"><h3>Aucun résultat</h3><p>Aucun film ne correspond à ces critères.</p></div>';
 
-  return barre + chips + tris +
+  return barre + panneauF + chips + tris +
     '<div class="eyebrow">' + (q ? 'Titres contenant « ' + esc(state.qlF.trim()) + ' »' : (FILTRES_F.find(x => x.id === f) || {}).l) +
       ' <b>' + l.length + '</b>' +
       (resteF ? '<span style="color:var(--signal);letter-spacing:.04em">à voir ' + dureeLongue(resteF) + '</span>' : "") +
@@ -1573,7 +1619,7 @@ function carteFilm(f){
     '<div class="ops">' +
       '<button class="op' + (n ? " vu" : "") + '" data-act="tick-f" data-id="' + esc(f.id) + '" title="' + (n ? "Retirer le dernier visionnage" : "Marquer vu") + '" aria-label="Marquer vu">' + svg("check", 16) + '</button>' +
       (n ? '<button class="op" data-act="again-f" data-id="' + esc(f.id) + '" title="Compter un visionnage de plus" aria-label="Revu"><span class="mono" style="font-size:11px;font-weight:600">+1</span></button>' : "") +
-      '<button class="op' + (f.archive ? " on" : "") + '" data-act="archiver-f" data-id="' + esc(f.id) + '" title="' + (f.archive ? "Sortir des archives" : "Archiver") + '" aria-label="Archiver">' + svg("archive", 16) + '</button>' +
+      '<button class="op' + (f.favorite ? " fa" : "") + '" data-act="favori-f" data-id="' + esc(f.id) + '" title="' + (f.favorite ? "Retirer des favoris" : "Mettre en favori") + '" aria-label="Favori">' + (f.favorite ? "★" : "☆") + '</button>' +
       '<button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button>' +
     '</div></div>';
 }
@@ -2394,6 +2440,14 @@ document.addEventListener("click", async ev => {
   }
   if(act === "an-stats"){ state.anStats = id; render(); return; }
   if(act === "panneau"){ state.panneau = !state.panneau; render(); return; }
+  if(act === "panneau-f"){ state.panneauF = !state.panneauF; render(); return; }
+  if(act === "genre-f"){ state.fGenreF = state.fGenreF === id ? "" : id; state.limiteF = PAGE; render(); return; }
+  if(act === "annee-f"){ state.fAnneeF = state.fAnneeF === id ? "" : id; state.limiteF = PAGE; render(); return; }
+  if(act === "duree-f"){ state.fDureeF = state.fDureeF === id ? "" : id; state.limiteF = PAGE; render(); return; }
+  if(act === "reset-f"){
+    state.fGenreF = state.fAnneeF = state.fDureeF = state.qlF = "";
+    state.limiteF = PAGE; render(); toast("Filtres retirés"); return;
+  }
   if(act === "genre"){ state.genre = state.genre === id ? "" : id; state.limite = PAGE; render(); return; }
   if(act === "plateforme"){ state.plateforme = state.plateforme === id ? "" : id; state.limite = PAGE; render(); return; }
   if(act === "diffusion"){ state.diffusion = id; state.limite = PAGE; render(); return; }
@@ -2749,6 +2803,41 @@ document.addEventListener("toggle", ev => {
       const c = $("#ver-chip"); if(c) c.classList.remove("neuf"); }
   }
 }, true);
+
+/* ---------- défilement horizontal à la souris ----------
+   Les rangées de filtres se font glisser au doigt sur mobile ; au pointeur,
+   rien ne se passait. On rétablit le glisser-déposer et la molette, en
+   neutralisant le clic lorsqu'il s'agissait en fait d'un déplacement. */
+(function(){
+  let piste = null, depart = 0, base = 0, bouge = false;
+  document.addEventListener("pointerdown", ev => {
+    if(ev.pointerType === "touch" || ev.button !== 0) return;
+    const c = ev.target.closest(".chips");
+    if(!c || c.scrollWidth <= c.clientWidth + 2) return;
+    piste = c; depart = ev.clientX; base = c.scrollLeft; bouge = false;
+  });
+  document.addEventListener("pointermove", ev => {
+    if(!piste) return;
+    const d = ev.clientX - depart;
+    if(!bouge && Math.abs(d) > 4){ bouge = true; piste.classList.add("tire"); }
+    if(bouge){ piste.scrollLeft = base - d; ev.preventDefault(); }
+  });
+  const fin = () => { if(piste) piste.classList.remove("tire"); piste = null; };
+  document.addEventListener("pointerup", fin);
+  document.addEventListener("pointercancel", fin);
+  document.addEventListener("click", ev => {
+    if(!bouge) return;
+    bouge = false;
+    ev.stopPropagation(); ev.preventDefault();
+  }, true);
+  document.addEventListener("wheel", ev => {
+    const c = ev.target.closest(".chips");
+    if(!c || c.scrollWidth <= c.clientWidth + 2) return;
+    if(Math.abs(ev.deltaY) <= Math.abs(ev.deltaX)) return;
+    c.scrollLeft += ev.deltaY;
+    ev.preventDefault();
+  }, { passive:false });
+})();
 
 /* ---------- recherche live ---------- */
 let _cle;
