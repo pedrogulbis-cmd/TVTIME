@@ -126,6 +126,18 @@ nav.tabs{
 .code.next{background:var(--signalF);border-color:var(--signalB);color:var(--signal)}
 .code.vu{background:var(--vuF);border-color:var(--vuB);color:var(--vu)}
 .code.pass{background:var(--signalF);border-color:var(--signalB);color:var(--signal)}
+/* État de diffusion : le point plein dit « ça continue », le point creux
+   « c'est fini ». Volontairement sobre, pour ne pas concurrencer le bouton
+   d'action ni la couleur du déjà-vu. */
+.etat{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;
+  letter-spacing:.02em;padding:1px 7px;border-radius:5px;border:1px solid var(--trait);
+  background:var(--carte2);color:var(--gris);white-space:nowrap}
+.etat::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;
+  margin-right:5px;vertical-align:1px;border:1px solid var(--gris);background:transparent}
+.etat.en{color:var(--papier)}
+.etat.en::before{background:var(--vu);border-color:var(--vu)}
+.etat.att{color:var(--papier)}
+.etat.att::before{background:var(--signal);border-color:var(--signal)}
 .xn{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--vu);
   background:var(--vuF);border:1px solid var(--vuB);border-radius:5px;
   padding:0 5px;flex:0 0 auto}
@@ -319,9 +331,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.10.1";
+const VERSION = "1.10.2";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.10.2", d:"2026-08-24", t:"État de diffusion dans la liste", l:[
+    "Chaque carte de Séries porte une pastille En cours, Terminée, En dev ou À confirmer.",
+    "Point plein pour une série qui continue, point creux pour une série terminée.",
+    "La ligne de description ne répète plus « À jour » puisque la pastille le dit déjà."
+  ]},
   { v:"1.10.1", d:"2026-08-24", t:"Bouton d'épisode plus clair", l:[
     "Le bouton d'enchaînement n'est plus vert : le vert signale ce qui est déjà vu et prêtait à confusion. Il passe à l'orange d'action.",
     "Il porte le code de l'épisode qu'il va cocher, S01E03, pour savoir exactement sur quoi on appuie.",
@@ -738,6 +755,17 @@ const DIFFUSION = {
   "In Development":     ["En développement", "next"],
   "Ended":              ["Terminée", ""]
 };
+const DIFFUSION_COURT = {
+  "Running":          ["En cours", "en"],
+  "To Be Determined": ["À confirmer", "att"],
+  "In Development":   ["En dev", "att"],
+  "Ended":            ["Terminée", ""]
+};
+function etatCourt(sh){
+  const d = DIFFUSION_COURT[sh.status];
+  if(!d) return sh.status ? '<span class="etat">' + esc(sh.status) + '</span>' : "";
+  return '<span class="etat ' + d[1] + '">' + d[0] + '</span>';
+}
 function chipDiffusion(sh){
   const d = DIFFUSION[sh.status];
   if(!d) return sh.status ? '<span class="code">' + esc(sh.status) + '</span>' : "";
@@ -960,12 +988,12 @@ function carteSerie(sh){
   const resteTxt = reste ? "reste " + dureeLongue(reste)
     : futurs ? futurs + " à venir"
     : a.total && a.watched === a.total ? "complète" : "à jour";
-  const pp = passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "";
+  const pp = etatCourt(sh) + " " + (passe(sh) > 1 ? '<span class="code pass">Passage ' + passe(sh) + '</span> ' : "");
   let ligne;
   if(nx) ligne = pp + esc(nx.t || "Épisode sans titre");
-  else if(up) ligne = pp + 'À jour · retour ' + relDate(up.d);
-  else if(a.total && a.watched === a.total) ligne = pp + 'Terminée';
-  else ligne = pp + 'À jour';
+  else if(up) ligne = pp + 'retour ' + relDate(up.d);
+  else if(a.total && a.watched === a.total) ligne = pp + 'tout vu';
+  else ligne = pp + 'à jour';
   return '<div class="card serie' + (sh.archive ? " arch" : "") + '">' +
     '<button class="row" style="flex:1;min-width:0" data-act="open" data-id="' + sh.id + '">' +
     affiche(sh) +
