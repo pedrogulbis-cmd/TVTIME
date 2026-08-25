@@ -224,6 +224,9 @@ nav.tabs{
 .ops{gap:6px;align-items:stretch}
 .opsrow{display:flex;gap:6px;justify-content:flex-end}
 .opsrow .opnext{flex:1}
+.opnext.dv{border-color:var(--vuB);background:var(--vuF);color:var(--vu)}
+.opnext.dv:active{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
+.opnext.fait{border-color:var(--trait);background:var(--carte2);color:var(--gris);cursor:default}
 .op.moins{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600}
 /* Bouton « épisode suivant » : orange d'action, jamais vert — le vert est
    réservé à ce qui est déjà vu, et prêtait à confusion ici. */
@@ -406,9 +409,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.21.3";
+const VERSION = "1.22.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.22.0", d:"2026-08-25", t:"Ajouter à voir ou déjà vu", l:[
+    "Les résultats de recherche proposent deux boutons au lieu d'un : « À voir » et « Déjà vu ».",
+    "« Déjà vue » sur une série marque d'un coup tous les épisodes diffusés, sans avoir à ouvrir la fiche ensuite.",
+    "« Déjà vu » sur un film enregistre un visionnage à la date du jour.",
+    "Les deux proposent « Annuler » pendant quelques secondes, qui retire complètement l'ajout.",
+    "Une série déjà présente affiche « Ajoutée » et une corbeille, plutôt qu'une coche qui la retirait au moindre tap.",
+    "Cliquer sur un résultat ne l'ajoute plus discrètement à ta liste."
+  ]},
   { v:"1.21.3", d:"2026-08-25", t:"Un film ajouté n'a plus l'air déjà vu", l:[
     "La pastille d'un film non vu affichait une coche et le mot « Vu » : elle annonçait un état alors qu'elle proposait une action. Elle dit maintenant « Marquer vu ».",
     "Sur un film déjà vu, le +1 porte le signe du revisionnage plutôt qu'une coche.",
@@ -2188,15 +2199,19 @@ function vueRecherche(){
   if(state.cibleRecherche === "films") return vueRechercheFilms();
   const res = state.res.map(sh => {
     const dedans = !!DB.shows[sh.id];
-    return '<div class="card" style="display:flex">' +
+    return '<div class="card serie">' +
       '<button class="row" style="flex:1;min-width:0" data-act="preview" data-id="' + sh.id + '">' + affiche(sh) +
       '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
       '<div class="sub">' + [sh.premiered ? sh.premiered.slice(0, 4) : "", sh.network, (sh.genres || []).slice(0, 2).join(", ")]
         .filter(Boolean).map(esc).join(" · ") + '</div></div></button>' +
-      '<div style="display:grid;place-items:center;padding-right:11px">' +
-        '<button class="check ' + (dedans ? "on" : "") + '" data-act="add" data-id="' + sh.id + '" aria-label="Ajouter">' +
-        (dedans ? svg("check", 20) : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>') +
-        '</button></div></div>';
+      '<div class="ops">' +
+        (dedans
+          ? '<span class="opnext fait">Ajoutée</span>' +
+            '<div class="opsrow"><button class="op sup" data-act="supprimer" data-id="' + sh.id + '" ' +
+            'title="Retirer de ma liste" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
+          : '<button class="opnext" data-act="add" data-id="' + sh.id + '" title="Ajouter à voir">À voir</button>' +
+            '<button class="opnext dv" data-act="add-vu" data-id="' + sh.id + '" title="Ajouter en marquant tous les épisodes diffusés comme vus">Déjà vue</button>') +
+      '</div></div>';
   }).join("");
 
   return '<div style="padding-top:14px"></div>' +
@@ -2211,16 +2226,20 @@ function vueRecherche(){
 function vueRechercheFilms(){
   const res = state.resF.map(f => {
     const dedans = !!DB.films[f.id];
-    return '<div class="card" style="display:flex">' +
+    return '<div class="card serie">' +
       '<div class="row" style="flex:1;min-width:0">' + afficheFilm(f) +
       '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
       '<div class="sub">' + esc([f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
       (f.resume ? '<div class="sub" style="-webkit-line-clamp:2;margin-top:4px">' + esc(f.resume) + '</div>' : "") +
       '</div></div>' +
-      '<div style="display:grid;place-items:center;padding-right:11px">' +
-        '<button class="check ' + (dedans ? "on" : "") + '" data-act="add-f" data-id="' + esc(f.id) + '" aria-label="Ajouter">' +
-        (dedans ? svg("check", 20) : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>') +
-        '</button></div></div>';
+      '<div class="ops">' +
+        (dedans
+          ? '<span class="opnext fait">Ajouté</span>' +
+            '<div class="opsrow"><button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" ' +
+            'title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
+          : '<button class="opnext" data-act="add-f" data-id="' + esc(f.id) + '" title="Ajouter à voir">À voir</button>' +
+            '<button class="opnext dv" data-act="add-f-vu" data-id="' + esc(f.id) + '" title="Ajouter en le marquant déjà vu">Déjà vu</button>') +
+      '</div></div>';
   }).join("");
 
   return '<div style="padding-top:14px"></div>' +
@@ -2706,15 +2725,30 @@ document.addEventListener("click", async ev => {
 
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "open-f"){ ouvrirFicheFilm(id); return; }
-  if(act === "add-f"){
-    if(DB.films[id]){ retirerFilm(id); toast("Retiré de tes films"); render(); return; }
+  if(act === "add-f" || act === "add-f-vu"){
+    if(DB.films[id]) return;
     const brut = state.resF.find(x => x.id === id);
     if(!brut) return;
     el.innerHTML = "…";
     const f = await completerFilm(brut);
-    ajouterFilm(f, "planned");
-    toast("« " + f.titre + " » ajouté");
-    render(); return;
+    const fi = ajouterFilm(f, act === "add-f-vu" ? "watched" : "planned");
+    if(act === "add-f-vu"){
+      fi.vu = [new Date().toISOString()];
+      fi.statut = "watched";
+      sauverFilm(fi);
+    }
+    corbeille = { type:"ajout-film", objet:fi };
+    render();
+    toast("« " + fi.titre + " »" + (act === "add-f-vu" ? " · marqué vu aujourd'hui" : " · à voir"), "annuler-ajout");
+    return;
+  }
+  if(act === "annuler-ajout"){
+    if(!corbeille || (corbeille.type !== "ajout-serie" && corbeille.type !== "ajout-film")) return fermerToast();
+    const o = corbeille.objet;
+    corbeille.type === "ajout-serie" ? retirerShow(o.id) : retirerFilm(o.id);
+    corbeille = null; render();
+    toast("Ajout annulé");
+    return;
   }
   if(act === "tick-f"){
     const f = DB.films[id]; if(!f) return;
@@ -2941,20 +2975,29 @@ document.addEventListener("click", async ev => {
     if(sh){ ajouterShow(sh, DB.shows[+id].userStatus); toast("Fiche à jour"); }
     render(); return;
   }
-  if(act === "add"){
+  if(act === "add" || act === "add-vu"){
+    if(DB.shows[+id]) return;
     el.innerHTML = "…";
-    if(DB.shows[+id]){ retirerShow(+id); toast("Retirée de ta liste"); render(); return; }
     const sh = await fetchShow(+id);
-    if(sh){ ajouterShow(sh, "watching"); toast("« " + sh.name + " » ajoutée"); }
-    render(); return;
+    if(!sh){ render(); return toast("Fiche introuvable"); }
+    ajouterShow(sh, act === "add-vu" ? "watching" : "planned");
+    const cible = DB.shows[sh.id];
+    let n = 0;
+    if(act === "add-vu"){
+      // « Déjà vue » : tout ce qui est diffusé passe vu, à la date du jour.
+      epsOf(cible).filter(diffuse).forEach(e => { marquer(e, cible, true); n++; });
+      autoStatut(cible); toucher(cible); sauverShow(cible);
+    }
+    corbeille = { type:"ajout-serie", objet:cible };
+    render();
+    toast("« " + cible.name + " »" + (n ? " · " + n + " épisodes marqués vus" : " · à voir"), "annuler-ajout");
+    return;
   }
-  if(act === "preview"){ 
-    const ex = DB.shows[+id];
-    if(ex){ ouvrirFiche(+id); return; }
-    el.style.opacity = ".5";
-    const sh = await fetchShow(+id);
-    el.style.opacity = "";
-    if(sh){ ajouterShow(sh, "planned"); render(); ouvrirFiche(+id); }
+  if(act === "preview"){
+    // Une fiche n'existe que pour une série de ta liste : on ne l'ajoute plus
+    // en douce au simple fait de vouloir la regarder de plus près.
+    if(DB.shows[+id]) ouvrirFiche(+id);
+    else toast("Ajoute-la d'abord, à voir ou déjà vue");
     return;
   }
   if(act === "pays"){
