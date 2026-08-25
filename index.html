@@ -406,9 +406,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.21.1";
+const VERSION = "1.21.2";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.21.2", d:"2026-08-25", t:"Audit des blocages d'interface", l:[
+    "Revue de tous les éléments superposés capables d'intercepter un clic, à la suite du blocage précédent.",
+    "Une fiche dont la série ou le film a été supprimé ne bloque plus le défilement de la page : l'état se remet à plat au lieu de rester ouvert sur du vide.",
+    "Le blocage du défilement se décide sur ce qui est réellement affiché, plus sur l'intention d'afficher.",
+    "Un glissement de rangée interrompu hors de la fenêtre n'avale plus le clic suivant.",
+    "La hauteur figée le temps d'un rendu est relâchée même si le rendu échoue."
+  ]},
   { v:"1.21.1", d:"2026-08-25", t:"L'application ne se bloque plus après un message", l:[
     "Les messages porteurs d'un bouton « Annuler » restaient capteurs de clics après avoir disparu : invisibles, ils se plaçaient juste au-dessus de la barre d'onglets et interceptaient chaque tap. Toute la navigation semblait figée jusqu'au rechargement.",
     "Le défaut touchait les trois messages avec bouton : suppression, rattrapage et lancement d'un revisionnage.",
@@ -1162,12 +1169,12 @@ function render(){
   const hauteur = vueEl.offsetHeight;
   if(hauteur) vueEl.style.minHeight = hauteur + "px";
 
-  dessiner();
+  try{ dessiner(); }
+  finally{ requestAnimationFrame(() => { vueEl.style.minHeight = ""; }); }
 
   const neuf = document.querySelector(".sheet");
   if(neuf && posSheet) neuf.scrollTop = posSheet;
   if(window.scrollY !== posPage) window.scrollTo(0, posPage);
-  requestAnimationFrame(() => { vueEl.style.minHeight = ""; });
 }
 
 function dessiner(){
@@ -1196,6 +1203,10 @@ function dessiner(){
   else if(state.tab === "stats")    v.innerHTML = vueStats();
   else                              v.innerHTML = vueReglages();
 
+  // Une fiche dont l'objet a disparu produit du vide : on remet alors l'état à
+  // plat, faute de quoi le défilement resterait bloqué sans rien à l'écran.
+  if(state.detail && !DB.shows[state.detail]) state.detail = null;
+  if(state.detailF && !DB.films[state.detailF]) state.detailF = null;
   $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail])
                         : state.detailF ? vueFicheFilm(DB.films[state.detailF]) : "";
   if((state.detail || state.detailF) && state.animer){
@@ -1203,7 +1214,9 @@ function dessiner(){
     if(el) el.classList.add("neuve");
     state.animer = false;
   }
-  document.body.style.overflow = (state.detail || state.detailF || state.tirage) ? "hidden" : "";
+  // On se fie à ce qui est réellement affiché, pas à l'intention.
+  const couvert = !!($("#sheet").firstChild || $("#modal").firstChild);
+  document.body.style.overflow = couvert ? "hidden" : "";
 }
 
 /* ---------- bandes de diffusion (élément signature) ---------- */
@@ -3104,10 +3117,12 @@ document.addEventListener("toggle", ev => {
 (function(){
   let piste = null, depart = 0, base = 0, bouge = false;
   document.addEventListener("pointerdown", ev => {
+    bouge = false;   // toujours remis à plat : un glissement avorté ailleurs
+                     // laissait le drapeau levé et avalait le clic suivant
     if(ev.pointerType === "touch" || ev.button !== 0) return;
     const c = ev.target.closest(".chips");
     if(!c || c.scrollWidth <= c.clientWidth + 2) return;
-    piste = c; depart = ev.clientX; base = c.scrollLeft; bouge = false;
+    piste = c; depart = ev.clientX; base = c.scrollLeft;
   });
   document.addEventListener("pointermove", ev => {
     if(!piste) return;
