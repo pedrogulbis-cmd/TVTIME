@@ -419,9 +419,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.28.2";
+const VERSION = "1.28.3";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.28.3", d:"2026-08-26", t:"Dates de sortie complètes", l:[
+    "L'année était masquée quand la date tombait dans l'année en cours — commode pour un épisode de la semaine, trompeur pour une date de sortie. Elle est désormais toujours affichée sur les fiches.",
+    "Un film ou une série pas encore sortis annoncent « Sortie prévue le » plutôt que « Sorti le », au passé.",
+    "La durée n'apparaît plus deux fois sur la fiche d'un film."
+  ]},
   { v:"1.28.2", d:"2026-08-26", t:"Dépôt Drive : diagnostic", l:[
     "Un dépôt réussi se comptait lui-même comme une modification, si bien qu'Antenne se croyait toujours en retard sur Drive.",
     "Un échec du dépôt automatique disparaissait en silence. Il est désormais conservé et affiché en rouge dans les Réglages, avec le message d'erreur exact.",
@@ -921,7 +926,12 @@ const REGLES = [
   [/^(\d+) séries?$/,               (m, a) => a + " series"],
   [/^(\d+) films?$/,                (m, a) => a + " movie" + (+a > 1 ? "s" : "")],
   [/^Rétrospective (\d+)$/,         (m, a) => "Year in review " + a],
-  [/^Aujourd'hui · (.+)$/,          (m, a) => "Today · " + a]
+  [/^Aujourd'hui · (.+)$/,          (m, a) => "Today · " + a],
+  [/^Sorti le (.+)$/,               (m, a) => "Released " + a],
+  [/^Sortie prévue le (.+)$/,       (m, a) => "Due " + a],
+  [/^Diffusion prévue le (.+)$/,    (m, a) => "Airing from " + a],
+  [/^Depuis le (.+)$/,              (m, a) => "Since " + a],
+  [/^Jusqu'au (.+)$/,               (m, a) => "Until " + a]
 ];
 
 function traduireTexte(t){
@@ -969,11 +979,13 @@ const JOURS_EN = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
 const MOIS = new Proxy({}, { get:(_, i) => (LANG() === "fr" ? MOIS_FR : MOIS_EN)[i] });
 const JOURS = new Proxy({}, { get:(_, i) => (LANG() === "fr" ? JOURS_FR : JOURS_EN)[i] });
 
-function frDate(iso){
+/* avecAn force l'affichage de l'année. Utile pour une date de sortie : la
+   masquer parce qu'elle tombe dans l'année en cours donne un repère bancal. */
+function frDate(iso, avecAn){
   if(!iso) return LANG() === "fr" ? "date inconnue" : "unknown date";
   const d = new Date(iso + "T12:00:00");
   if(isNaN(d)) return iso;
-  const an = d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "";
+  const an = (avecAn || d.getFullYear() !== new Date().getFullYear()) ? " " + d.getFullYear() : "";
   return LANG() === "fr"
     ? JOURS[d.getDay()] + " " + d.getDate() + " " + MOIS[d.getMonth()] + an
     : JOURS[d.getDay()] + " " + MOIS[d.getMonth()] + " " + d.getDate() + an;
@@ -2253,7 +2265,7 @@ function carteFilm(f){
 function vueFicheFilm(f){
   if(!f) return "";
   const n = nbVuesFilm(f);
-  const meta = [(f.genres || []).join(", "), f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ");
+  const meta = (f.genres || []).join(", ");   // la durée est déjà en pastille
   return '<div class="sheet">' +
     '<div class="sheetnav"><button class="iconbtn" data-act="close-sheet" aria-label="Retour">' + svg("back", 19) + '</button>' +
       '<div style="flex:1;font-family:Archivo;font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.titre) + '</div></div>' +
@@ -2262,7 +2274,12 @@ function vueFicheFilm(f){
                  : '<div class="poster lg"><div class="ph">' + esc(f.titre[0]) + '</div></div>') +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(f.titre) + '</h2>' +
       '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' +
-        (f.date ? '<span class="code next">Sorti le ' + esc(frDate(String(f.date).slice(0, 10))) + '</span>'
+        (f.date ? (function(){
+            const d = String(f.date).slice(0, 10);
+            const futur = d > todayISO();
+            return '<span class="code ' + (futur ? "pass" : "next") + '">' +
+              (futur ? "Sortie prévue le " : "Sorti le ") + esc(frDate(d, true)) + '</span>';
+          })()
                 : f.annee ? '<span class="code">' + esc(f.annee) + '</span>' : "") +
         (f.duree ? '<span class="code">' + f.duree + ' min</span>' : "") + '</div>' +
       '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc(meta) + '</div>' +
@@ -2761,8 +2778,9 @@ function vueFiche(sh){
     '<div class="hero"><div class="row">' + affiche(sh, "lg") +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(sh.name) + '</h2>' +
       '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' + chipDiffusion(sh) +
-        (sh.premiered ? '<span class="code">Depuis le ' + esc(frDate(sh.premiered)) + '</span>' : "") +
-        (sh.ended ? '<span class="code">Jusqu\'au ' + esc(frDate(sh.ended)) + '</span>' : "") +
+        (sh.premiered ? '<span class="code">' +
+          (sh.premiered > todayISO() ? "Diffusion prévue le " : "Depuis le ") + esc(frDate(sh.premiered, true)) + '</span>' : "") +
+        (sh.ended ? '<span class="code">Jusqu\'au ' + esc(frDate(sh.ended, true)) + '</span>' : "") +
         (sh.network ? '<span class="code">' + esc(sh.network) + '</span>' : "") +
         (sh.runtime ? '<span class="code">' + sh.runtime + ' min</span>' : "") + '</div>' +
       '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc((sh.genres || []).join(", ")) + '</div>' +
