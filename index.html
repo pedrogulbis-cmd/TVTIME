@@ -174,6 +174,9 @@ nav.tabs{
 .note-hist>summary{list-style:none;font-size:11.5px;color:var(--gris);cursor:pointer}
 .note-hist>summary::-webkit-details-marker{display:none}
 .note-anc{border-top:1px solid var(--trait);padding-top:8px;margin-top:8px}
+.note-avant{opacity:.75}
+.note-rang{font-family:"IBM Plex Mono",monospace;font-size:10.5px;font-weight:600;color:var(--gris);
+  border:1px solid var(--trait);border-radius:5px;padding:1px 6px;white-space:nowrap}
 .note-anc-h{display:flex;align-items:center;gap:8px}
 .note-date{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);margin-left:auto}
 .code.etoile{background:rgba(245,196,81,.12);border-color:var(--or);color:var(--or)}
@@ -441,9 +444,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.31.1";
+const VERSION = "1.31.2";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.31.2", d:"2026-08-26", t:"Une note par visionnage, nommée", l:[
+    "Chaque note porte le visionnage ou le passage auquel elle se rapporte : « 2ᵉ visionnage », « 3ᵉ passage ».",
+    "Les notes précédentes ne sont plus repliées : elles s'empilent sous la note courante, chacune avec son rang et sa date.",
+    "Quand un nouveau visionnage n'a pas encore de note, le bandeau propose « ☆ Noter ce 2ᵉ visionnage » au lieu de « Modifier » : on voit avant de cliquer qu'on ajoute et n'écrase rien.",
+    "Rouvrir une note existante d'un moment précédent la modifie bien, au lieu de repartir de la dernière."
+  ]},
   { v:"1.31.1", d:"2026-08-26", t:"Noter la série entière, ajouter au lieu de modifier", l:[
     "Une note et une critique pour la série elle-même, en plus de celles des saisons. La pastille dorée s'affiche aussi dans l'entête de la fiche.",
     "L'éditeur annonce désormais ce qu'il va faire : ajouter une nouvelle note à l'historique, ou modifier celle du tel jour.",
@@ -915,6 +924,7 @@ const DICO = {
   "Notes précédentes":"Earlier ratings", "Note enregistrée":"Rating saved", "Notes supprimées":"Ratings deleted",
   "Nouvelle note ajoutée à l’historique":"New rating added to the history",
   "Ajouter une note plutôt que modifier":"Add a rating instead of editing",
+  "Ajouter":"Add", "Noter":"Rate", "☆ Noter":"☆ Rate",
   "Marquer uniquement cet épisode":"Mark only this episode",
   "Compter un visionnage de plus":"Count one more viewing",
   "Actualiser":"Refresh",
@@ -997,7 +1007,9 @@ const REGLES = [
   [/^(\d+) épisodes cochés jusqu'à (.+)$/, (m, a, b) => a + " episodes ticked up to " + b],
   [/^Visionnage n°(\d+) compté$/,   (m, a) => "Viewing no. " + a + " counted"],
   [/^(\d+) notes? plus anciennes?$/, (m, a) => a + " earlier rating" + (+a > 1 ? "s" : "")],
-  [/^Modification de ta note du (.+)$/, (m, a) => "Editing your rating from " + a],
+  [/^Modification de ta note du (.+)$/, (m, a) => "Editing your rating for your " + a],
+  [/^Nouvelle note pour ton (.+)$/, (m, a) => "New rating for your " + a],
+  [/^☆ Noter ce (.+)$/,             (m, a) => "☆ Rate this " + a],
   [/^Moyenne de tes (\d+) saisons notées : (.+) sur 5$/, (m, a, b) => "Average of your " + a + " rated seasons: " + b + " out of 5"]
 ];
 
@@ -1627,9 +1639,10 @@ function ecrireNote(k, n, t, p, forcerNeuve){
   t = String(t || "").trim();
   if(!n && !t){ retirerNote(k); return; }
   const r = DB.notes[k] || { k, e:[] };
-  const d = r.e.length ? r.e[r.e.length - 1] : null;
-  if(d && d.p === p && !forcerNeuve){ d.n = n; d.t = t; d.q = new Date().toISOString(); }
+  const d = forcerNeuve ? null : r.e.filter(x => x.p === p).pop();
+  if(d){ d.n = n; d.t = t; d.q = new Date().toISOString(); }
   else r.e.push({ q:new Date().toISOString(), n, t, p });
+  r.e.sort((a, b) => (a.p - b.p) || String(a.q).localeCompare(String(b.q)));
   DB.notes[k] = r;
   sauverNote(r);
 }
@@ -1649,6 +1662,15 @@ function moyenneSaisons(sh){
   return { n:l.reduce((a, b) => a + b, 0) / l.length, nb:l.length };
 }
 const fmtNote = n => (Math.round(n * 10) / 10).toString().replace(".", ",");
+/* « 2ᵉ visionnage », « 3ᵉ passage » : chaque note porte le moment auquel elle
+   se rapporte, pour qu'on voie d'un coup d'œil qu'on en ajoute une plutôt que
+   de remplacer la précédente. */
+function rang(p, type){
+  const mot = type === "film" ? "visionnage" : "passage";
+  if(LANG() === "fr") return (p <= 1 ? "1er " : p + "ᵉ ") + mot;
+  const suf = p === 1 ? "st" : p === 2 ? "nd" : p === 3 ? "rd" : "th";
+  return p + suf + (type === "film" ? " viewing" : " pass");
+}
 
 /* Cinq étoiles, chacune coupée en deux moitiés cliquables. */
 function etoiles(n, cle){
@@ -1665,23 +1687,32 @@ function etoiles(n, cle){
 }
 
 /* Bandeau de note, posé en tête d'une saison ou dans une fiche film. */
-function blocNote(cle, titre, p){
-  const d = derniereNote(cle);
-  const hist = entrees(cle).slice(0, -1).reverse();
+function blocNote(cle, titre, p, type){
+  const toutes = entrees(cle).slice().reverse();
+  const courante = toutes.find(x => x.p === p) || null;
+  const anciennes = toutes.filter(x => x !== courante);
+  const multi = p > 1 || toutes.length > 0;
+
+  const ligne = (x, actuelle) =>
+    '<div class="note-anc' + (actuelle ? " act" : "") + '">' +
+      '<div class="note-anc-h">' + etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' +
+      (multi ? '<span class="note-rang">' + rang(x.p, type) + '</span>' : "") +
+      '<span class="note-date">' + frDate(String(x.q).slice(0, 10), true) + '</span></div>' +
+      (x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") + '</div>';
+
   return '<div class="note-bloc">' +
-    '<button class="note-ouvre" data-act="note-edit" data-k="' + esc(cle) + '" data-titre="' + esc(titre) + '" data-p="' + p + '">' +
-      (d ? etoiles(d.n, "") + '<span class="note-val">' + fmtNote(d.n) + '</span>'
-         : '<span class="note-vide">☆ Noter</span>') +
-      '<span class="note-crayon">Modifier</span>' +
+    '<button class="note-ouvre" data-act="note-edit" data-k="' + esc(cle) + '" data-titre="' + esc(titre) + '" ' +
+      'data-p="' + p + '" data-type="' + type + '">' +
+      (courante
+        ? etoiles(courante.n, "") + '<span class="note-val">' + fmtNote(courante.n) + '</span>' +
+          (multi ? '<span class="note-rang">' + rang(p, type) + '</span>' : "") +
+          '<span class="note-crayon">Modifier</span>'
+        : '<span class="note-vide">☆ ' + (multi ? "Noter ce " + rang(p, type) : "Noter") + '</span>' +
+          '<span class="note-crayon">Ajouter</span>') +
     '</button>' +
-    (d && d.t ? '<p class="note-texte">' + esc(d.t) + '</p>' : "") +
-    (hist.length
-      ? '<details class="note-hist"><summary>' + hist.length + ' note' + (hist.length > 1 ? "s" : "") + ' plus ancienne' + (hist.length > 1 ? "s" : "") + '</summary>' +
-        hist.map(x => '<div class="note-anc">' +
-          '<div class="note-anc-h">' + etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' +
-          '<span class="note-date">' + frDate(String(x.q).slice(0, 10), true) + '</span></div>' +
-          (x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") + '</div>').join("") +
-        '</details>'
+    (courante && courante.t ? '<p class="note-texte">' + esc(courante.t) + '</p>' : "") +
+    (anciennes.length
+      ? '<div class="note-avant">' + anciennes.map(x => ligne(x, false)).join("") + '</div>'
       : "");
 }
 
@@ -1689,16 +1720,16 @@ function blocNote(cle, titre, p){
 function vueNote(){
   const e = state.note;
   if(!e) return "";
-  const d = derniereNote(e.k);
-  // Nouvelle entrée si le moment a changé, ou si on l'a demandé explicitement.
-  const neuve = !d || d.p !== e.p || e.neuf;
-  const hist = entrees(e.k).slice(neuve ? 0 : -1).reverse();
+  const d = entrees(e.k).find(x => x.p === e.p) || null;
+  // Nouvelle entrée si aucune note n'existe pour ce moment, ou si on l'a demandé.
+  const neuve = !d || e.neuf;
+  const hist = entrees(e.k).filter(x => x !== d).reverse();
   return '<div class="voile" data-act="note-fermer"><div class="modal" data-act="rien">' +
     '<h2>' + esc(e.titre) + '</h2>' +
     '<p class="note">Ta note et ce que tu en as pensé. Rien n\'est partagé, tout reste chez toi.</p>' +
-    '<div class="mono" style="font-size:11px;margin-top:9px;color:' + (neuve ? "var(--vu)" : "var(--gris)") + '">' +
-      (neuve ? "Nouvelle note ajoutée à l\'historique"
-             : "Modification de ta note du " + frDate(String(d.q).slice(0, 10), true)) + '</div>' +
+    '<div class="mono" style="font-size:11.5px;margin-top:9px;font-weight:600;color:' + (neuve ? "var(--vu)" : "var(--gris)") + '">' +
+      (neuve ? "Nouvelle note pour ton " + rang(e.p, e.type)
+             : "Modification de ta note du " + rang(e.p, e.type)) + '</div>' +
     (neuve ? "" : '<button class="btn sm" style="margin-top:9px" data-act="note-neuve">Ajouter une note plutôt que modifier</button>') +
     '<div style="display:flex;align-items:center;gap:12px;margin-top:14px">' +
       etoiles(e.n, e.k) +
@@ -2521,7 +2552,7 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
-      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, Math.max(1, n)) +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, Math.max(1, n), "film") +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
       blocCasting(f) +
       blocOTT(f) +
@@ -2979,7 +3010,7 @@ function vueFiche(sh){
       '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
       (tous ? "Tout décocher" : "Tout cocher") + '</span></summary>' +
       '<div style="padding:11px 11px 1px">' +
-        blocNote(cleSaison(sh.id, s), (s === 0 ? "Spéciaux" : "Saison " + s) + " · " + sh.name, P) + '</div>' +
+        blocNote(cleSaison(sh.id, s), (s === 0 ? "Spéciaux" : "Saison " + s) + " · " + sh.name, P, "serie") + '</div>' +
       eps.map(e => {
         const w2 = vu(e, sh), nv = nbVues(e);
         const der = nv ? vues(e)[nv - 1] : null;
@@ -3046,7 +3077,7 @@ function vueFiche(sh){
         : '<div class="box" style="margin-top:14px;text-align:center;font-size:13px;color:var(--gris)">Aucun épisode en attente</div>') +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
-      '<div class="eyebrow">Ta note</div>' + blocNote(cleSerie(sh.id), sh.name, P) +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleSerie(sh.id), sh.name, P, "serie") +
       '<div class="eyebrow">Statut</div>' +
       '<div class="seg">' + STATUTS.map(([id, l]) =>
         '<button class="' + (sh.userStatus === id ? "on" : "") + '" data-act="statut" data-id="' + sh.id + '" data-v="' + id + '">' + l + '</button>').join("") + '</div>' +
@@ -3448,7 +3479,9 @@ document.addEventListener("click", async ev => {
     const p = +el.dataset.p || 1;
     // Une note posée à un autre moment ouvre une nouvelle entrée : on part du
     // texte précédent pour pouvoir l'amender, sans l'écraser.
-    state.note = { k, titre:el.dataset.titre, p, n:d ? d.n : 0, t:d ? d.t : "" };
+    const courante = entrees(k).find(x => x.p === p) || null;
+    state.note = { k, titre:el.dataset.titre, p, type:el.dataset.type || "serie",
+                   n:courante ? courante.n : 0, t:courante ? courante.t : "" };
     render(); return;
   }
   if(act === "note-etoile"){
