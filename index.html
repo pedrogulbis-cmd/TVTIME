@@ -419,9 +419,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.28.1";
+const VERSION = "1.28.2";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.28.2", d:"2026-08-26", t:"Dépôt Drive : diagnostic", l:[
+    "Un dépôt réussi se comptait lui-même comme une modification, si bien qu'Antenne se croyait toujours en retard sur Drive.",
+    "Un échec du dépôt automatique disparaissait en silence. Il est désormais conservé et affiché en rouge dans les Réglages, avec le message d'erreur exact.",
+    "L'état indique le délai avant le prochain dépôt programmé plutôt qu'une formule vague."
+  ]},
   { v:"1.28.1", d:"2026-08-26", t:"Traduction achevée", l:[
     "Les 43 phrases d'explication des Réglages qui restaient en français sont traduites : l'interface est complète en anglais.",
     "Seuls les commentaires du code et le journal des versions restent en français ; ni l'un ni l'autre n'est du texte d'interface."
@@ -1133,15 +1138,18 @@ const IDB = (() => {
 /* ---------- file d'écriture ---------- */
 const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), films:new Set(), supprFilms:new Set(), kv:false };
 let _fl;
-function planifier(){
-  // On note qu'il y a du neuf : c'est ce qui décidera d'un dépôt sur Drive,
-  // plutôt qu'un simple calendrier qui sauvegarderait pour rien.
-  if(DB.meta) DB.meta.modifie = Date.now();
+/* interne = true pour les écritures déclenchées par Antenne elle-même, comme
+   l'horodatage d'un dépôt : elles ne doivent pas être comptées comme une
+   modification de tes données, sinon chaque dépôt en appellerait un autre. */
+function planifier(interne){
   clearTimeout(_fl); _fl = setTimeout(ecouler, 150);
+  if(interne) return;
+  if(DB.meta) DB.meta.modifie = Date.now();
   clearTimeout(_cloud);
+  _cloudQuand = Date.now() + 120000;
   _cloud = setTimeout(gdAuto, 120000);
 }
-let _cloud;
+let _cloud, _cloudQuand = 0;
 async function ecouler(){
   if(!pret) return;
   if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.films.size && !sale.supprFilms.size && !sale.kv) return;
@@ -1155,7 +1163,7 @@ async function ecouler(){
   try{ await IDB.ecrire(lots); }
   catch(e){ toast("Enregistrement impossible : " + (e && e.message || e)); }
 }
-function sauver(){ sale.kv = true; planifier(); }
+function sauver(interne){ sale.kv = true; planifier(interne); }
 function sauverShow(sh){ if(sh) sale.shows.add(String(sh.id)); sale.kv = true; planifier(); }
 function sauverFilm(fi){ if(fi) sale.films.add(String(fi.id)); sale.kv = true; planifier(); }
 function salirVues(k){ sale.vues.add(String(k)); planifier(); }
@@ -2945,8 +2953,9 @@ function vueReglages(){
               '<button class="btn pri" data-act="gd-envoyer">' + (gdConnecte() ? "Sauvegarder" : "Relier et sauvegarder") + '</button>' +
               '<button class="btn" data-act="gd-recuperer">Restaurer</button>' +
             '</div>' +
-            (gdConnecte() ? '<div class="mono" style="font-size:11px;margin-top:5px;color:var(--gris)">' +
-              esc(gdPourquoiPas() || "modifications en attente, dépôt au prochain déclenchement") + '</div>' : "") +
+            (gdConnecte() ? (function(){ const e = gdEtat();
+              return '<div class="mono" style="font-size:11px;margin-top:5px;color:' +
+                (e.ko ? "var(--rouge)" : "var(--gris)") + '">' + esc(e.txt) + '</div>'; })() : "") +
             '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
               '<div class="info"><div>Dépôt automatique</div>' +
               '<div class="note">Deux minutes après une modification, et seulement s\'il y a du neuf. ' +
@@ -3947,7 +3956,7 @@ async function gdEnvoyer(interactif){
       try{
         await gdAppel("https://www.googleapis.com/upload/drive/v3/files/" + DB.settings.gdFichier + "?uploadType=media",
           { method:"PATCH", headers:{ "Content-Type":"application/json" }, body:contenu }, interactif);
-        DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); sauver();
+        DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); DB.meta.cloudErr = null; sauver(true);
         return contenu.length;
       }catch(e){
         if(!/Drive 404/.test(e.message)) throw e;
@@ -3962,7 +3971,7 @@ async function gdEnvoyer(interactif){
     const r = await gdAppel("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
       { method:"POST", headers:{ "Content-Type":"multipart/related; boundary=" + lim }, body:corps }, interactif);
     DB.settings.gdFichier = (await r.json()).id;
-    DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); sauver();
+    DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); DB.meta.cloudErr = null; sauver(true);
     return contenu.length;
   }finally{ GD.enCours = false; }
 }
@@ -4000,17 +4009,36 @@ function gdPourquoiPas(){
   if((DB.meta.modifie || 0) <= (DB.meta.cloud || 0)) return "à jour, rien de neuf depuis le dernier dépôt";
   const r = gdReste();
   if(r > 0) return "modifications en attente, dépôt dans " + Math.ceil(r / 60000) + " min";
+  if(_cloudQuand > Date.now()) return "dépôt programmé dans " + Math.max(1, Math.round((_cloudQuand - Date.now()) / 60000)) + " min";
   return null;
 }
+function gdEtat(){
+  const e = DB.meta.cloudErr;
+  if(e && (DB.meta.modifie || 0) > (DB.meta.cloud || 0))
+    return { txt:"dernier dépôt automatique en échec : " + e.m + " — utilise Sauvegarder", ko:true };
+  const p = gdPourquoiPas();
+  return { txt:p || "dépôt imminent", ko:false };
+}
 async function gdAuto(){
+  _cloudQuand = 0;
   if(!gdConnecte() || !DB.settings.gdAuto) return;
   if((DB.meta.modifie || 0) <= (DB.meta.cloud || 0)) return;
   const r = gdReste();
-  if(r > 0){ clearTimeout(_cloud); _cloud = setTimeout(gdAuto, r + 2000); return; }
+  if(r > 0){
+    clearTimeout(_cloud);
+    _cloudQuand = Date.now() + r + 2000;
+    _cloud = setTimeout(gdAuto, r + 2000);
+    return;
+  }
   try{
     await gdEnvoyer(false);
-    if(state.tab === "reglages" && !state.detail && !state.detailF) render();
-  }catch(e){ /* silence : le dépôt manuel reste disponible */ }
+  }catch(e){
+    // Un échec silencieux laissait croire que tout allait bien : on le garde
+    // et on l'affiche dans les Réglages.
+    DB.meta.cloudErr = { q:Date.now(), m:String((e && e.message) || e).slice(0, 140) };
+    sauver(true);
+  }
+  if(state.tab === "reglages" && !state.detail && !state.detailF) render();
 }
 
 /* ---------- CSV : lecture ---------- */
