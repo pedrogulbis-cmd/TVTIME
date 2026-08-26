@@ -419,9 +419,19 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.27.0";
+const VERSION = "1.28.1";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.28.1", d:"2026-08-26", t:"Traduction achevée", l:[
+    "Les 43 phrases d'explication des Réglages qui restaient en français sont traduites : l'interface est complète en anglais.",
+    "Seuls les commentaires du code et le journal des versions restent en français ; ni l'un ni l'autre n'est du texte d'interface."
+  ]},
+  { v:"1.28.0", d:"2026-08-26", t:"Langue de l'application", l:[
+    "Le réglage passe de « langue des films » à la langue de l'application entière : interface, dates, durées, et fiches films chez TMDb.",
+    "L'anglais devient la langue par défaut ; le français reste à un clic dans Affichage.",
+    "Les séries viennent de TVmaze, qui ne publie aucune traduction : leurs titres, synopsis et noms d'épisodes restent dans leur langue d'origine.",
+    "Les pastilles de comptage sont retirées des onglets Séries et Films."
+  ]},
   { v:"1.27.0", d:"2026-08-26", t:"Filtres archivés réparés", l:[
     "Les filtres « Archivées » et « Favoris » ressortaient vides : ils retombaient dans le filtre par statut, qui cherchait une série dont le statut vaudrait « archived ». Corrigé des deux côtés, séries et films.",
     "Les fiches films se complètent toutes seules quand une mise à jour ajoute un champ, une seule fois : le numéro de révision est enregistré avant de commencer, ce qui rend toute relance en boucle impossible.",
@@ -724,21 +734,244 @@ appliquerTheme(themeActuel());
 if(media && media.addEventListener)
   media.addEventListener("change", () => { if(themeActuel() === "auto") appliquerTheme("auto"); });
 
-/* ---------- utilitaires ---------- */
+/* ============================================================
+   TRADUCTION DE L'INTERFACE
+   Le texte est écrit en français dans le code ; il est traduit après coup,
+   sur les nœuds de texte du rendu et sur les attributs visibles. Cette
+   approche ne touche jamais la structure du HTML ni la logique, et ce qui
+   n'est pas encore au dictionnaire reste simplement en français.
+   ============================================================ */
+const DICO = {
+  // onglets et navigation
+  "Séries":"Series", "Films":"Movies", "Agenda":"Schedule", "Stats":"Stats", "Réglages":"Settings",
+  "Retour":"Back", "Fermer":"Close", "Annuler":"Undo", "Ouvrir":"Open", "Interrompre":"Stop",
+  // filtres et tris des séries
+  "Toutes":"All", "Favoris":"Favourites", "En cours":"Watching", "Revisionnage":"Rewatching",
+  "En retard":"Behind", "À jour":"Up to date", "Terminées":"Finished", "À voir":"Watchlist",
+  "Abandonnées":"Dropped", "Archivées":"Archived",
+  "Diffusion":"Air date", "Reprise":"Last opened", "Plus vite finie":"Quickest to finish",
+  "Plus longue":"Longest", "A → Z":"A → Z", "Avancement":"Progress", "Ajout":"Date added",
+  "Filtres":"Filters", "Effacer":"Clear", "Retirer les filtres":"Clear filters",
+  "Genre":"Genre", "Chaîne ou plateforme":"Network or platform", "Décennie de sortie":"Release decade",
+  "Reste à voir":"Left to watch", "Peu importe":"Any", "En production":"In production",
+  "Terminée":"Ended", "Moins de 2 h":"Under 2h", "2 à 5 h":"2 to 5h", "5 à 15 h":"5 to 15h",
+  "Plus de 15 h":"Over 15h", "Filtrer par titre…":"Filter by title…",
+  // filtres et tris des films
+  "Tous":"All", "Vus":"Watched", "Revus":"Rewatched", "Archivés":"Archived",
+  "Sortie":"Release", "Durée":"Runtime",
+  "Moins d'1 h 30":"Under 1h30", "1 h 30 à 2 h":"1h30 to 2h", "2 h à 2 h 30":"2h to 2h30",
+  "Plus de 2 h 30":"Over 2h30",
+  // agenda
+  "7 jours":"7 days", "30 jours":"30 days", "3 mois":"3 months",
+  "Reprises de saison":"Season premieres", "Séries à jour":"Caught-up series",
+  "Groupé par date":"Grouped by date", "Groupé par série":"Grouped by series",
+  "Cette semaine":"This week", "Ce mois-ci":"This month", "Plus tard":"Later",
+  "À venir":"Upcoming", "Rien de programmé":"Nothing scheduled",
+  "Aucune date de diffusion connue pour tes séries.":"No air dates known for your series.",
+  "Aucune diffusion ne correspond à ces critères.":"No broadcast matches these filters.",
+  // cartes
+  "vus":"watched", "à jour":"up to date", "tout vu":"all watched", "retour":"back",
+  "Passage":"Pass", "En dev":"In dev", "À confirmer":"To be confirmed",
+  "à voir":"to watch", "complète":"complete", "Marquer vu":"Mark watched",
+  "Revoir":"Rewatch", "pas encore vu":"not watched yet",
+  // fiche
+  "Statut":"Status", "Synopsis":"Synopsis", "Distribution":"Cast", "Épisodes":"Episodes",
+  "Gestion":"Manage", "Où regarder":"Where to watch", "Spéciaux":"Specials",
+  "Tout cocher":"Check all", "Tout décocher":"Uncheck all",
+  "Prochain épisode":"Next episode", "Aucun épisode en attente":"No episode waiting",
+  "Archiver":"Archive", "Sortir des archives":"Unarchive",
+  "Retirer la série":"Remove series", "Retirer le film":"Remove movie",
+  "Fiche TVmaze":"TVmaze page", "Visionnages":"Viewings",
+  "Revoir depuis le début":"Rewatch from the start", "Revu une fois de plus":"Watched once more",
+  "Retirer un visionnage":"Remove a viewing", "Marquer ce film vu":"Mark this movie watched",
+  "Compris dans un abonnement":"Included with a subscription", "Location ou achat":"Rent or buy",
+  "Recherche des plateformes…":"Looking up platforms…", "Chargement…":"Loading…",
+  "Chargement du résumé…":"Loading summary…",
+  "Aucun résumé publié pour cet épisode.":"No summary published for this episode.",
+  "Ouvrir la fiche JustWatch":"Open the JustWatch page",
+  "Disponibilités fournies par JustWatch via TMDb.":"Availability provided by JustWatch via TMDb.",
+  "Aucune distribution publiée pour ce titre.":"No cast published for this title.",
+  "Réalisation":"Director", "Scénario":"Writer",
+  "Voir sa filmographie":"See their filmography",
+  // recherche et ajout
+  "Rechercher une série":"Search for a series", "Titre de série…":"Series title…",
+  "Titre du film…":"Movie title…", "Résultats":"Results", "Ajoutée":"Added", "Ajouté":"Added",
+  "Déjà vue":"Already seen", "Déjà vu":"Already seen",
+  "Tape un titre pour chercher un film.":"Type a title to search for a movie.",
+  "Aucun film trouvé sous ce titre.":"No movie found under that title.",
+  "Aucune série trouvée. Essaie le titre original en anglais.":"No series found. Try the original English title.",
+  "Tape un titre pour chercher dans le catalogue TVmaze.":"Type a title to search the TVmaze catalogue.",
+  // états vides
+  "Liste vide":"Empty list", "Aucun film":"No movies", "Aucun résultat":"No results",
+  "Commence ta collection":"Start your collection",
+  "Ajoute une première série pour démarrer.":"Add a first series to get going.",
+  "Chercher une série":"Search for a series", "Chercher un film":"Search for a movie",
+  "Aucune série ne correspond à ces critères.":"No series matches these filters.",
+  "Aucun film ne correspond à ces critères.":"No movie matches these filters.",
+  "Pas encore de statistiques":"No statistics yet",
+  "Elles apparaîtront dès tes premiers épisodes cochés.":"They appear as soon as you check your first episodes.",
+  // tirage au sort
+  "Ce soir ?":"Tonight?", "Une autre":"Another one",
+  "Un tirage au hasard dans ce qui t'attend.":"A random pick from what's waiting for you.",
+  "Favoris seulement":"Favourites only", "★ Favoris seulement":"★ Favourites only",
+  "Choisir quoi regarder":"Pick something to watch",
+  // stats
+  "Bilan":"Overview", "visionnages":"viewings", "temps d'écran":"screen time",
+  "d'écran":"on screen", "épisodes distincts":"distinct episodes", "revisionnages":"rewatches",
+  "séries suivies":"series tracked", "séries terminées":"series finished",
+  "finies / revues":"finished / rewatched", "vus / suivis":"watched / tracked",
+  "épisodes":"episodes", "films":"movies", "jours actifs":"active days",
+  "Activité sur 12 mois":"Activity over 12 months", "Carte d'activité":"Activity map",
+  "Rétrospective":"Year in review", "Les plus regardées":"Most watched",
+  "Temps par série":"Time per series", "Genres":"Genres", "moins":"less", "plus":"more",
+  // réglages : intitulés
+  "Sauvegarde":"Backup", "Exporter":"Export", "Cloud":"Cloud", "Données":"Data",
+  "Affichage":"Display", "Thème":"Theme", "Sombre":"Dark", "Clair":"Light", "Système":"System",
+  "Langue":"Language", "Version":"Version", "Entretien":"Maintenance",
+  "Repartir de zéro":"Start over", "Journal des versions":"Version history",
+  "Sauvegarde JSON":"JSON backup", "Épisodes CSV":"Episodes CSV", "Films CSV":"Movies CSV",
+  "Restaurer":"Restore", "Sauvegarder":"Save now", "Relier et sauvegarder":"Connect and save",
+  "Délier ce compte":"Unlink this account", "Dépôt automatique":"Automatic backup",
+  "Clé TMDb":"TMDb key", "Pays pour les plateformes":"Country for platforms",
+  "Épisodes spéciaux":"Special episodes", "Stockage durable":"Persistent storage",
+  "Activer":"Enable", "actif":"on", "inactif":"off",
+  "Actualiser les séries modifiées":"Refresh changed series",
+  "Tout retélécharger (long)":"Re-download everything (slow)",
+  "Purger toutes les données":"Wipe all data", "Bibliothèque saine":"Library is healthy",
+  "Reprendre TV Time":"Import from TV Time", "Reprendre BetaSeries":"Import from BetaSeries",
+  "Choisir un fichier ZIP ou CSV":"Choose a ZIP or CSV file",
+  "Choisir le ZIP ou les deux CSV":"Choose the ZIP or both CSVs",
+  "Choisir un fichier JSON":"Choose a JSON file",
+  "Importer une liste de titres":"Import a list of titles",
+  "Ajouter ces séries":"Add these series", "Traiter":"Fix", "Nettoyer":"Clean up",
+  "Fusionner":"Merge", "France":"France", "Belgique":"Belgium", "Suisse":"Switzerland",
+  "Canada":"Canada", "Royaume-Uni":"United Kingdom", "États-Unis":"United States",
+  // réglages : phrases d'explication
+  "Marquer S":"Mark S",
+  "Actualiser":"Refresh",
+  "Dépose ici le":"Drop here the",
+  "ID client OAuth":"OAuth client ID",
+  "Clé TMDb requise":"TMDb key required",
+  "Google Drive API":"Google Drive API",
+  "Recharger la page":"Reload the page",
+  "Aller aux Réglages":"Go to Settings",
+  "Titres contenant «":"Titles containing “",
+  "Tu en es au passage":"You are on pass",
+  "Langue des fiches films":"Language of movie pages",
+  "Importer l’archive TV Time":"Import the TV Time archive",
+  "à coller dans les Réglages.":"to paste into Settings.",
+  "Importer l’export BetaSeries":"Import the BetaSeries export",
+  "Ouverture de la bibliothèque…":"Opening your library…",
+  "Utiliser mon propre identifiant":"Use my own client ID",
+  "Espace utilisé : mesure en cours…":"Space used: measuring…",
+  "La langue ne s’applique pas aux séries.":"The language setting does not apply to series.",
+  "Hors-séries, récaps et OAV comptés dans l’avancement.":"Specials, recaps and OVAs counted towards progress.",
+  "Cherche un film, ajoute-le, coche-le quand tu l’as vu.":"Search for a movie, add it, tick it once you have seen it.",
+  "Aucun doublon, aucun épisode orphelin, aucune série vide.":"No duplicates, no orphan episodes, no empty series.",
+  "La recherche de films passe par TMDb. Une clé gratuite suffit,":"Movie search goes through TMDb. A free key is all it takes,",
+  "La connexion passe par l’identifiant du site. Ta sauvegarde va dans":"Sign-in uses the site's client ID. Your backup goes to your own",
+  "Facultatif. Un identifiant client OAuth personnel remplace celui du site.":"Optional. A personal OAuth client ID replaces the site's own.",
+  "Depuis BetaSeries : Membre → Préférences → Exporter mes données. Dépose le":"From BetaSeries: Member → Preferences → Export my data. Drop the",
+  "Rien n’est récupérable ensuite. Exporte d’abord si tu tiens à quelque chose.":"Nothing can be recovered afterwards. Export first if anything matters to you.",
+  "Un titre par ligne. Les séries sont ajoutées en « À voir », sans épisode coché.":"One title per line. Series are added to the watchlist, with no episode ticked.",
+  "Cette série n’a pas de correspondance dans TMDb, la diffusion ne peut pas être vérifiée.":"This series has no match on TMDb, so availability cannot be checked.",
+  "Une sauvegarde complète : séries, films, visionnages, statuts. Garde-la, c’est ton seul filet.":"A complete backup: series, movies, viewings, statuses. Keep it — it is your only safety net.",
+  "Repartir de S01E01 sans rien perdre : les épisodes se décochent, l’historique et le temps d’écran restent.":"Start again from S01E01 without losing anything: episodes are unticked, history and screen time stay.",
+  "Drive, et le site n’y a aucun accès : chaque navigateur obtient sa propre autorisation, qu’il est seul à détenir.":"Drive, and the site has no access to it: each browser gets its own authorisation, which it alone holds.",
+  "Ce site fournit sa propre clé : la recherche de films fonctionne sans rien configurer. Tu peux la remplacer par la tienne ci-dessous.":"This site provides its own key: movie search works with no setup. You can replace it with your own below.",
+  "Sans lui, un navigateur peut effacer les données d’un site resté longtemps sans visite. Le mettre en place ne coûte rien et ne change rien d’autre.":"Without it, a browser may erase the data of a site left unvisited for a long time. Turning it on costs nothing and changes nothing else.",
+  "Compte environ une seconde par série — le catalogue TVmaze limite le rythme des requêtes. Un CSV seul fonctionne aussi, y compris venant d’un autre outil.":"Allow about one second per series — the TVmaze catalogue limits the request rate. A lone CSV works too, including one from another tool.",
+  "Elle suit la langue de l’application, réglée plus haut dans Affichage. Quand TMDb n’a pas de synopsis traduit, celui d’origine est repris plutôt qu’un vide.":"It follows the app language, set above under Display. When TMDb has no translated synopsis, the original one is used rather than a blank.",
+  "Elles viennent de TVmaze, qui publie titres, synopsis et noms d’épisodes dans la langue d’origine sans proposer de traduction. Ce réglage ne peut donc rien y changer.":"They come from TVmaze, which publishes titles, synopses and episode names in their original language with no translation on offer. This setting therefore cannot change them.",
+  "La recherche de films passe par TMDb. La clé est gratuite : compte sur themoviedb.org, puis Paramètres → API. Elle reste dans ce navigateur et n’est envoyée qu’à TMDb.":"Movie search goes through TMDb. The key is free: an account on themoviedb.org, then Settings → API. It stays in this browser and is only ever sent to TMDb.",
+  "Détermine où chercher les plateformes de diffusion affichées sur les fiches, séries comme films. Les disponibilités viennent de JustWatch via TMDb et sont conservées douze jours.":"Sets where to look up the streaming platforms shown on pages, for series as well as movies. Availability comes from JustWatch via TMDb and is kept for twelve days.",
+  "Antenne peut déposer sa sauvegarde dans ton Google Drive et la reprendre sur un autre appareil. Il faut pour cela un identifiant client OAuth, gratuit, propre à ton installation :":"Antenne can drop its backup into your Google Drive and pick it up on another device. This needs an OAuth client ID, free, specific to your own install:",
+  "Interface, dates et durées, ainsi que les titres et synopsis des films chez TMDb. Les séries viennent de TVmaze, qui ne publie pas de traduction : leurs textes restent dans leur langue d’origine.":"Interface, dates and durations, along with movie titles and synopses from TMDb. Series come from TVmaze, which publishes no translation: their text stays in its original language.",
+  "Le changement s’applique aux prochaines recherches. Les fiches déjà en bibliothèque se complètent d’elles-mêmes, une seule fois, quand une mise à jour d’Antenne ajoute un champ. Ce bouton force le passage pour toute la filmothèque :":"The change applies to future searches. Pages already in your library fill themselves in, once only, when an Antenne update adds a field. This button forces the pass over the whole collection:",
+  "Les séries sans épisode viennent le plus souvent d’un import où le catalogue n’a rien renvoyé. Les épisodes hors catalogue sont des visionnages dont l’épisode a disparu ou changé d’identifiant : leur temps compte encore dans les statistiques sans être rattaché à rien.":"Series with no episodes usually come from an import where the catalogue returned nothing. Off-catalogue episodes are viewings whose episode has vanished or changed identifier: their time still counts in your statistics without being attached to anything.",
+  "Cet export ne contient pas d’identifiant TVDB : la correspondance se fait sur le titre, avec plusieurs tentatives dont le titre sans son année. Les séries introuvables sont listées à la fin. Il ne contient pas non plus les revisionnages — chaque épisode y figure une seule fois.":"This export carries no TVDB identifier: matching is done on the title, with several attempts including the title without its year. Series that cannot be found are listed at the end. It carries no rewatches either — each episode appears only once."
+};
+
+/* Tournures construites au vol : le dictionnaire ne peut pas les couvrir. */
+const REGLES = [
+  [/^(\d+)\/(\d+) vus$/,            (m, a, b) => a + "/" + b + " watched"],
+  [/^(\d+)\/(\d+) épisodes$/,       (m, a, b) => a + "/" + b + " episodes"],
+  [/^reste (.+)$/,                  (m, a) => a + " left"],
+  [/^à voir (.+)$/,                 (m, a) => a + " to watch"],
+  [/^(\d+) à venir$/,               (m, a) => a + " upcoming"],
+  [/^(\d+) % vus$/,                 (m, a) => a + " % watched"],
+  [/^vu le (.+)$/,                  (m, a) => "watched " + a],
+  [/^retour (.+)$/,                 (m, a) => "back " + a],
+  [/^Saison (\d+)$/,                (m, a) => "Season " + a],
+  [/^Passage (\d+)$/,               (m, a) => "Pass " + a],
+  [/^(.+) de visionnage$/,          (m, a) => a + " watched"],
+  [/^Vue (\d+) fois en entier$/,    (m, a) => "Watched " + a + " times in full"],
+  [/^(\d+) épisodes? revus?$/,      (m, a) => a + " episode" + (+a > 1 ? "s" : "") + " rewatched"],
+  [/^Tout rattraper — (\d+) épisodes$/, (m, a) => "Catch up — " + a + " episodes"],
+  [/^Marquer S(\d+)E(\d+) vu$/,     (m, a, b) => "Mark S" + a + "E" + b + " watched"],
+  [/^Afficher (\d+) séries de plus$/,     (m, a) => "Show " + a + " more series"],
+  [/^Afficher (\d+) films de plus$/,      (m, a) => "Show " + a + " more movies"],
+  [/^Afficher (\d+) diffusions de plus$/, (m, a) => "Show " + a + " more airings"],
+  [/^Titres contenant « (.+) »$/,   (m, a) => "Titles containing “" + a + "”"],
+  [/^(\d+) séries?$/,               (m, a) => a + " series"],
+  [/^(\d+) films?$/,                (m, a) => a + " movie" + (+a > 1 ? "s" : "")],
+  [/^Rétrospective (\d+)$/,         (m, a) => "Year in review " + a],
+  [/^Aujourd'hui · (.+)$/,          (m, a) => "Today · " + a]
+];
+
+function traduireTexte(t){
+  if(DICO[t] !== undefined) return DICO[t];
+  for(const [re, f] of REGLES){
+    const m = re.exec(t);
+    if(m) return f.apply(null, m);
+  }
+  return null;
+}
+const ATTRS = ["title", "placeholder", "aria-label"];
+function traduire(racine){
+  if(!racine || LANG() === "fr") return;
+  const w = document.createTreeWalker(racine, NodeFilter.SHOW_TEXT);
+  let n;
+  while((n = w.nextNode())){
+    const brut = n.nodeValue, t = brut.trim();
+    if(!t) continue;
+    const tr = traduireTexte(t);
+    if(tr !== null) n.nodeValue = brut.replace(t, tr);
+  }
+  racine.querySelectorAll("[" + ATTRS.join("],[") + "]").forEach(el => {
+    ATTRS.forEach(a => {
+      const v = el.getAttribute(a);
+      if(!v) return;
+      const tr = traduireTexte(v.trim());
+      if(tr !== null) el.setAttribute(a, tr);
+    });
+  });
+}
+
+/* ---------- utilitaires ---------- *//* ---------- utilitaires ---------- */
 const $ = s => document.querySelector(s);
 const p2 = n => String(n).padStart(2, "0");
 const esc = s => String(s == null ? "" : s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const strip = h => { const d = document.createElement("div"); d.innerHTML = h || ""; return (d.textContent || "").trim(); };
 const todayISO = () => { const d = new Date(); return d.getFullYear() + "-" + p2(d.getMonth()+1) + "-" + p2(d.getDate()); };
-const MOIS = ["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"];
-const JOURS = ["dim","lun","mar","mer","jeu","ven","sam"];
+const MOIS_FR = ["janv","févr","mars","avr","mai","juin","juil","août","sept","oct","nov","déc"];
+const MOIS_EN = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const JOURS_FR = ["dim","lun","mar","mer","jeu","ven","sam"];
+const JOURS_EN = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+/* Accesseurs plutôt que tableaux figés : la langue se répercute partout où
+   MOIS et JOURS sont déjà lus, sans réécrire un seul appel. */
+const MOIS = new Proxy({}, { get:(_, i) => (LANG() === "fr" ? MOIS_FR : MOIS_EN)[i] });
+const JOURS = new Proxy({}, { get:(_, i) => (LANG() === "fr" ? JOURS_FR : JOURS_EN)[i] });
 
 function frDate(iso){
-  if(!iso) return "date inconnue";
+  if(!iso) return LANG() === "fr" ? "date inconnue" : "unknown date";
   const d = new Date(iso + "T12:00:00");
   if(isNaN(d)) return iso;
-  return JOURS[d.getDay()] + " " + d.getDate() + " " + MOIS[d.getMonth()] + (d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "");
+  const an = d.getFullYear() !== new Date().getFullYear() ? " " + d.getFullYear() : "";
+  return LANG() === "fr"
+    ? JOURS[d.getDay()] + " " + d.getDate() + " " + MOIS[d.getMonth()] + an
+    : JOURS[d.getDay()] + " " + MOIS[d.getMonth()] + " " + d.getDate() + an;
 }
 /* Compte à rebours avant diffusion. Précis à l'heure quand TVmaze a fourni
    l'horodatage complet, sinon on retombe sur le jour. Un épisode américain
@@ -751,24 +984,31 @@ function compteRebours(ep){
   if(ms <= 0) return null;
   if(!ep.a) return { txt:relDate(ep.d), precis:false };
   const j = Math.floor(ms / 86400000), h = Math.floor(ms % 86400000 / 3600000), m = Math.floor(ms % 3600000 / 60000);
-  return { precis:true, txt: j >= 1 ? "dans " + j + " j " + h + " h"
-    : h >= 1 ? "dans " + h + " h " + p2(m)
-    : "dans " + m + " min" };
+  const fr = LANG() === "fr";
+  return { precis:true, txt: j >= 1 ? (fr ? "dans " + j + " j " + h + " h" : "in " + j + "d " + h + "h")
+    : h >= 1 ? (fr ? "dans " + h + " h " + p2(m) : "in " + h + "h " + p2(m))
+    : (fr ? "dans " + m + " min" : "in " + m + " min") };
 }
 function relDate(iso){
-  if(!iso) return "date inconnue";
+  const fr = LANG() === "fr";
+  if(!iso) return fr ? "date inconnue" : "unknown date";
   const a = new Date(iso + "T12:00:00"), b = new Date(todayISO() + "T12:00:00");
   const j = Math.round((a - b) / 86400000);
-  if(j === 0) return "aujourd'hui";
-  if(j === 1) return "demain";
-  if(j === -1) return "hier";
-  if(j < 0 && j > -7) return "il y a " + (-j) + " jours";
-  if(j > 0 && j < 7)  return "dans " + j + " jours";
+  if(j === 0) return fr ? "aujourd'hui" : "today";
+  if(j === 1) return fr ? "demain" : "tomorrow";
+  if(j === -1) return fr ? "hier" : "yesterday";
+  if(j < 0 && j > -7) return fr ? "il y a " + (-j) + " jours" : (-j) + " days ago";
+  if(j > 0 && j < 7)  return fr ? "dans " + j + " jours" : "in " + j + " days";
   return frDate(iso);
 }
 function dureeLongue(min){
   if(!min) return "0 h";
   const j = Math.floor(min / 1440), h = Math.floor((min % 1440) / 60), m = min % 60;
+  if(LANG() !== "fr"){
+    if(j) return h ? j + "d " + h + "h" : j + "d";
+    if(h) return m ? h + "h " + p2(m) : h + "h";
+    return m + " min";
+  }
   if(j) return h ? j + " j " + h + " h" : j + " j";
   if(h) return m ? h + " h " + p2(m) : h + " h";
   return m + " min";
@@ -778,6 +1018,7 @@ function toast(msg, action){
   t.innerHTML = '<span>' + esc(msg) + '</span>' +
     (action ? '<button class="toast-act" data-act="' + action + '">Annuler</button>' : "");
   t.classList.toggle("agir", !!action);
+  traduire(t);
   t.classList.add("on");
   clearTimeout(toast._t);
   toast._t = setTimeout(() => { t.classList.remove("on", "agir"); }, action ? 6500 : 2400);
@@ -822,7 +1063,7 @@ const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, films:{}, settings:{ sp
 DEFAULTS.settings.theme = "sombre";
 DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de diffusion
 DEFAULTS.settings.filtre = "all";
-DEFAULTS.settings.langue = "fr";
+DEFAULTS.settings.langue = "en";   // anglais par défaut
 DEFAULTS.settings.pays = "FR";
 DEFAULTS.settings.gdAuto = true;   // dépôt automatique actif dès qu'un compte est relié
 let DB = JSON.parse(JSON.stringify(DEFAULTS));
@@ -1292,18 +1533,18 @@ function render(){
 
 function dessiner(){
   $("#tabs").innerHTML = TABS.map(t => {
-    const n = t.id === "library" ? listeASuivre().length
-            : t.id === "films"   ? Object.values(DB.films).filter(f => !f.archive && !nbVuesFilm(f)).length
-            : t.id === "reglages" && sauvegardeVieille() ? "!" : 0;
+    const n = t.id === "reglages" && sauvegardeVieille() ? "!" : 0;
     return '<button class="tab tab-wrap ' + (state.tab === t.id ? "on" : "") + '" data-act="tab" data-id="' + t.id + '">' +
       '<span style="position:relative;display:flex">' + svg(t.i, 20) +
       (n ? '<span class="badge">' + (n > 99 ? "99+" : n) + '</span>' : "") + '</span>' +
       '<span>' + t.l + '</span></button>';
   }).join("");
+  traduire($("#tabs"));
 
   const de = $("#de");
   if(de) de.classList.toggle("hide", !(state.tab === "library" || state.tab === "films") || state.cherche);
   $("#modal").innerHTML = state.tirage ? vueTirage() : "";
+  traduire($("#modal"));
 
   const chip = $("#ver-chip");
   if(chip){ chip.textContent = "v" + VERSION; chip.classList.toggle("neuf", state.neuf); }
@@ -1315,6 +1556,7 @@ function dessiner(){
   else if(state.tab === "agenda")   v.innerHTML = vueAgenda();
   else if(state.tab === "stats")    v.innerHTML = vueStats();
   else                              v.innerHTML = vueReglages();
+  traduire(v);
 
   // Une fiche dont l'objet a disparu produit du vide : on remet alors l'état à
   // plat, faute de quoi le défilement resterait bloqué sans rien à l'écran.
@@ -1322,6 +1564,7 @@ function dessiner(){
   if(state.detailF && !DB.films[state.detailF]) state.detailF = null;
   $("#sheet").innerHTML = state.detail ? vueFiche(DB.shows[state.detail])
                         : state.detailF ? vueFicheFilm(DB.films[state.detailF]) : "";
+  traduire($("#sheet"));
   if((state.detail || state.detailF) && state.animer){
     const el = document.querySelector(".sheet");
     if(el) el.classList.add("neuve");
@@ -1584,8 +1827,9 @@ async function jsonLibre(url){
 const cleTMDB = () => ((DB.settings && DB.settings.tmdb) || CFG.tmdb || "").trim();
 const tmdbDuSite = () => !!(CFG.tmdb && !(DB.settings && DB.settings.tmdb));
 const LANGUES = [["fr", "Français"], ["en", "English"]];
-const LANGUE = () => ((DB.settings && DB.settings.langue) === "en" ? "en-US" : "fr-FR");
-const langueNom = () => (LANGUE() === "en-US" ? "anglais" : "français");
+const LANG = () => ((DB.settings && DB.settings.langue) === "fr" ? "fr" : "en");
+const LANGUE = () => (LANG() === "fr" ? "fr-FR" : "en-US");
+const langueNom = () => (LANG() === "fr" ? "français" : "anglais");
 const PAYS = [["FR","France"],["BE","Belgique"],["CH","Suisse"],["CA","Canada"],["GB","Royaume-Uni"],["US","États-Unis"]];
 const paysOTT = () => (DB.settings && DB.settings.pays) || "FR";
 const paysNom = () => ((PAYS.find(x => x[0] === paysOTT()) || [,"France"])[1]);
@@ -2764,6 +3008,11 @@ function vueReglages(){
 
   '<div class="eyebrow">Affichage</div>' +
   '<div class="box">' +
+    '<div style="font-size:13.5px;margin-bottom:8px">Langue</div>' +
+    '<div class="seg">' + LANGUES.map(([id, l]) =>
+      '<button class="' + (LANG() === id ? "on" : "") + '" data-act="langue" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
+    '<p class="note" style="margin:9px 0 16px">Interface, dates et durées, ainsi que les titres et synopsis des films chez TMDb. ' +
+    'Les séries viennent de TVmaze, qui ne publie pas de traduction : leurs textes restent dans leur langue d\'origine.</p>' +
     '<div style="font-size:13.5px;margin-bottom:8px">Thème</div>' +
     '<div class="seg">' + THEMES.map(([id, l]) =>
       '<button class="' + (themeActuel() === id ? "on" : "") + '" data-act="theme" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
@@ -2784,11 +3033,9 @@ function vueReglages(){
         : cleTMDB() ? "Clé enregistrée — recherche de films active"
         : "Aucune clé : la recherche de films est désactivée") + '</div>' +
 
-    '<div style="font-size:13.5px;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--trait)">Langue des films</div>' +
-    '<div class="seg">' + LANGUES.map(([id, l]) =>
-      '<button class="' + ((DB.settings.langue || "fr") === id ? "on" : "") + '" data-act="langue" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
-    '<p class="note" style="margin-top:9px">Titres, affiches et synopsis des films, tels que TMDb les publie dans cette langue. ' +
-    'Quand un synopsis traduit n\'existe pas, celui d\'origine est repris plutôt qu\'un vide.</p>' +
+    '<div style="font-size:13.5px;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--trait)">Langue des fiches films</div>' +
+    '<p class="note" style="margin-top:0">Elle suit la langue de l\'application, réglée plus haut dans Affichage. ' +
+    'Quand TMDb n\'a pas de synopsis traduit, celui d\'origine est repris plutôt qu\'un vide.</p>' +
     '<p class="note" style="margin-top:7px">Le changement s\'applique aux prochaines recherches. ' +
     'Les fiches déjà en bibliothèque se complètent d\'elles-mêmes, une seule fois, quand une mise à jour d\'Antenne ajoute un champ. ' +
     'Ce bouton force le passage pour toute la filmothèque :</p>' +
@@ -3268,7 +3515,7 @@ document.addEventListener("click", async ev => {
   }
   if(act === "langue"){
     DB.settings.langue = id; sauver(); render();
-    toast("Films en " + langueNom());
+    toast(id === "fr" ? "Application en français" : "Application en anglais");
     return;
   }
   if(act === "relangue"){ await relangueFilms(); return; }
