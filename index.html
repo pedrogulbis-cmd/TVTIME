@@ -419,9 +419,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.29.0";
+const VERSION = "1.30.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.30.0", d:"2026-08-26", t:"Connexion Drive plus discrète, veille du stockage", l:[
+    "L'adresse du compte relié est mémorisée et transmise à Google : le sélecteur de compte ne devrait plus apparaître à chaque dépôt.",
+    "Le compte relié s'affiche dans l'encadré Cloud, et il est oublié quand on délie.",
+    "Les Réglages indiquent le pourcentage du quota consommé, et alertent en rouge au-delà de 90 %.",
+    "Un message au lancement prévient dès 95 %.",
+    "Une écriture refusée faute de place est identifiée comme telle et expliquée, au lieu d'un message technique."
+  ]},
   { v:"1.29.0", d:"2026-08-26", t:"Cochage en cascade", l:[
     "Dans une fiche série, cocher un épisode coche aussi tous les précédents encore en attente : après plusieurs épisodes d'affilée, un seul geste suffit.",
     "Le passage de revisionnage est respecté : au passage 2, la cascade attribue bien un second visionnage à chaque épisode traversé.",
@@ -883,6 +890,9 @@ const DICO = {
   "Ouverture de la bibliothèque…":"Opening your library…",
   "Utiliser mon propre identifiant":"Use my own client ID",
   "Espace utilisé : mesure en cours…":"Space used: measuring…",
+  "Le navigateur refuse d’écrire : tes dernières modifications ne sont pas enregistrées. Dépose une sauvegarde sur Drive, puis retire des séries archivées ou purge et réimporte.":"The browser refuses to write: your latest changes are not saved. Push a backup to Drive, then remove archived series, or wipe and re-import.",
+  "Tu approches du quota alloué. Vérifie que ta sauvegarde Drive est à jour, et allège la bibliothèque en retirant ce que tu ne suis plus.":"You are nearing the allotted quota. Check that your Drive backup is current, and trim the library of anything you no longer follow.",
+  "Stockage saturé : cette modification n’est pas enregistrée":"Storage full: this change was not saved",
   "La langue ne s’applique pas aux séries.":"The language setting does not apply to series.",
   "Hors-séries, récaps et OAV comptés dans l’avancement.":"Specials, recaps and OVAs counted towards progress.",
   "Cherche un film, ajoute-le, coche-le quand tu l’as vu.":"Search for a movie, add it, tick it once you have seen it.",
@@ -1183,8 +1193,14 @@ async function ecouler(){
   if(sale.kv) lots.kv = { settings:DB.settings, meta:DB.meta, version:SCHEMA };
   sale.shows.clear(); sale.suppr.clear(); sale.vues.clear();
   sale.films.clear(); sale.supprFilms.clear(); sale.kv = false;
-  try{ await IDB.ecrire(lots); }
-  catch(e){ toast("Enregistrement impossible : " + (e && e.message || e)); }
+  try{ await IDB.ecrire(lots); stockagePlein = false; }
+  catch(e){
+    const plein = /quota/i.test(String((e && e.name) || "")) || /quota/i.test(String((e && e.message) || ""));
+    stockagePlein = plein;
+    toast(plein ? "Stockage saturé : cette modification n'est pas enregistrée"
+                : "Enregistrement impossible : " + (e && e.message || e));
+    if(state.tab === "reglages" && !state.detail && !state.detailF) render();
+  }
 }
 function sauver(interne){ sale.kv = true; planifier(interne); }
 function sauverShow(sh){ if(sh) sale.shows.add(String(sh.id)); sale.kv = true; planifier(); }
@@ -1263,11 +1279,20 @@ function sauvegardeVieille(){
 /* ---------- espace disque ---------- */
 async function majQuota(){
   if(!navigator.storage || !navigator.storage.estimate) return;
+  /* Le quota d'IndexedDB est alloué par origine, pas par base : répartir les
+     données sur plusieurs bases ne donnerait pas un octet de plus. */
   try{
     state.quota = await navigator.storage.estimate();
     state.durable = navigator.storage.persisted ? await navigator.storage.persisted() : false;
     if(pret && state.tab === "reglages" && !state.detail && !state.cherche) render();
   }catch(e){}
+}
+let stockagePlein = false;
+/* Part du quota consommée, entre 0 et 1, ou null si le navigateur ne la donne pas. */
+function partQuota(){
+  const q = state.quota;
+  if(!q || !q.quota) return null;
+  return q.usage / q.quota;
 }
 function ko(o){
   if(o == null) return "?";
@@ -2987,7 +3012,8 @@ function vueReglages(){
           return '<p class="note">Sauvegarde déposée dans le dossier <b>' + esc(gdNomDossier()) + '</b> de ton Drive, ' +
             'sous le nom <span class="mono">' + GD_FICHIER + '</span>. Antenne ne voit que ce fichier, rien d\'autre de ton Drive.</p>' +
             '<div class="mono" style="font-size:11px;margin-top:9px;color:' + (gdConnecte() ? "var(--vu)" : "var(--gris)") + '">' +
-              (gdConnecte() ? "Relié · dernier dépôt " + q : "Identifiant enregistré, pas encore relié") + '</div>' +
+              (gdConnecte() ? "Relié" + (DB.settings.gdMail ? " · " + DB.settings.gdMail : "") + " · dernier dépôt " + q
+                             : "Identifiant enregistré, pas encore relié") + '</div>' +
             '<div class="grid2" style="margin-top:11px">' +
               '<button class="btn pri" data-act="gd-envoyer">' + (gdConnecte() ? "Sauvegarder" : "Relier et sauvegarder") + '</button>' +
               '<button class="btn" data-act="gd-recuperer">Restaurer</button>' +
@@ -3141,11 +3167,24 @@ function vueReglages(){
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + ' / ' + nf + '</div><div class="l">séries / films</div></div>' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + e + '</div><div class="l">visionnages</div></div>' +
     '</div>' +
-    '<p class="note" style="margin-top:11px">' +
-      (state.quota
-        ? 'Espace utilisé : <b class="mono">' + ko(state.quota.usage) + '</b> sur <b class="mono">' + ko(state.quota.quota) + '</b> alloués par le navigateur.'
-        : 'Espace utilisé : mesure en cours…') +
-      ' Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
+    (function(){
+      const part = partQuota();
+      const pc = part === null ? null : Math.round(part * 100);
+      const alerte = stockagePlein || (part !== null && part >= 0.9);
+      return '<p class="note" style="margin-top:11px' + (alerte ? ";color:var(--rouge)" : "") + '">' +
+        (state.quota
+          ? 'Espace utilisé : <b class="mono">' + ko(state.quota.usage) + '</b> sur <b class="mono">' + ko(state.quota.quota) +
+            '</b> alloués par le navigateur' + (pc !== null ? ' — <b class="mono">' + pc + ' %</b>' : "") + '.'
+          : 'Espace utilisé : mesure en cours…') +
+        ' Tout est enregistré dans ce navigateur, rien n\'est envoyé ailleurs.</p>' +
+        (stockagePlein
+          ? '<p class="note" style="color:var(--rouge)">Le navigateur refuse d\'écrire : tes dernières modifications ne sont pas enregistrées. ' +
+            'Dépose une sauvegarde sur Drive, puis retire des séries archivées ou purge et réimporte.</p>'
+          : part !== null && part >= 0.9
+            ? '<p class="note" style="color:var(--rouge)">Tu approches du quota alloué. Vérifie que ta sauvegarde Drive est à jour, ' +
+              'et allège la bibliothèque en retirant ce que tu ne suis plus.</p>'
+            : "");
+    })() +
     '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
       '<div class="info"><div>Stockage durable ' +
         (state.durable ? '<span class="code vu">actif</span>' : '<span class="code">inactif</span>') + '</div>' +
@@ -3593,6 +3632,7 @@ document.addEventListener("click", async ev => {
     try{
       const n = await gdEnvoyer(!gdConnecte());
       if(DB.settings.gdAuto === undefined) DB.settings.gdAuto = true;
+      await gdRetenirCompte();
       if(j) j.textContent += "Sauvegarde déposée : " + ko(n) + "\n";
       render(); toast("Sauvegarde déposée sur Drive");
     }catch(e){
@@ -3959,7 +3999,12 @@ async function gdJeton(interactif){
       });
     }
     GD.attente.push({ res, rej });
-    try{ GD.client.requestAccessToken({ prompt: interactif ? "consent" : "" }); }
+    // « hint » désigne le compte à réutiliser : sans lui, Google affiche son
+    // sélecteur dès qu'il connaît plusieurs comptes, même sans consentement
+    // à redemander.
+    const dem = { prompt: interactif ? "consent" : "" };
+    if(DB.settings.gdMail) dem.hint = DB.settings.gdMail;
+    try{ GD.client.requestAccessToken(dem); }
     catch(e){ GD.attente = []; rej(e); }
   });
 }
@@ -3995,6 +4040,18 @@ async function gdDossier(interactif){
 
 function contenuSauvegarde(){
   return JSON.stringify({ ...DB, app:"antenne", appVersion:VERSION, schema:SCHEMA, exportedAt:new Date().toISOString() });
+}
+
+/* Retient l'adresse du compte relié : c'est elle qui permettra aux dépôts
+   suivants de se faire sans sélecteur de compte. */
+async function gdRetenirCompte(){
+  if(DB.settings.gdMail) return;
+  try{
+    const r = await gdAppel("https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)");
+    const d = await r.json();
+    const m = d && d.user && d.user.emailAddress;
+    if(m){ DB.settings.gdMail = m; sauver(true); }
+  }catch(e){ /* sans importance : on retombe simplement sur le sélecteur */ }
 }
 
 async function gdEnvoyer(interactif){
@@ -4042,7 +4099,7 @@ async function gdRecuperer(interactif){
 function gdDeconnecter(){
   try{ if(GD.jeton && window.google && google.accounts) google.accounts.oauth2.revoke(GD.jeton); }catch(e){}
   GD.jeton = null; GD.expire = 0; GD.client = null;
-  DB.settings.gdFichier = ""; DB.settings.gdDossier = "";
+  DB.settings.gdFichier = ""; DB.settings.gdDossier = ""; DB.settings.gdMail = "";
   DB.meta.cloud = 0; sauver();
 }
 
@@ -4783,7 +4840,10 @@ async function demarrer(){
   }
 
   render();
-  majQuota();
+  majQuota().then(() => {
+    const part = partQuota();
+    if(part !== null && part >= 0.95) toast("Stockage à " + Math.round(part * 100) + " % — voir les Réglages");
+  });
   setTimeout(majAuto, 2500);
   setTimeout(majFilmsAuto, 9000);
 }
