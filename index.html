@@ -263,6 +263,7 @@ nav.tabs{
 .opsrow{display:flex;gap:6px;justify-content:flex-end}
 .opsrow .opnext{flex:1}
 .opnext.dv{border-color:var(--vuB);background:var(--vuF);color:var(--vu)}
+.btn.dv-plein{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
 .opnext.dv:active{background:var(--vu);border-color:var(--vu);color:var(--surVu)}
 .opnext.fait{border-color:var(--trait);background:var(--carte2);color:var(--gris);cursor:default}
 .op.moins{font-family:"IBM Plex Mono",monospace;font-size:12px;font-weight:600}
@@ -447,9 +448,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.31.3";
+const VERSION = "1.32.0";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.32.0", d:"2026-08-26", t:"Aperçu avant ajout", l:[
+    "Un résultat de recherche s'ouvre en fenêtre : affiche, dates, chaîne ou durée, synopsis et distribution complète.",
+    "Les deux boutons « À voir » et « Déjà vu » sont dans la fenêtre, qui se referme une fois le choix fait.",
+    "Rien n'est écrit dans la bibliothèque tant qu'on n'a pas décidé : consulter une fiche ne l'ajoute pas.",
+    "Un titre déjà présent ouvre directement sa vraie fiche au lieu de l'aperçu."
+  ]},
   { v:"1.31.3", d:"2026-08-26", t:"Noter aussi les visionnages passés", l:[
     "Le bandeau liste tous les visionnages, du plus récent au premier, et chacun porte son propre bouton.",
     "Un film revu trois fois sans jamais avoir été noté propose donc trois emplacements distincts, au lieu du seul dernier.",
@@ -930,6 +937,8 @@ const DICO = {
   "Ce que tu en as pensé…":"What you thought of it…",
   "Ta note et ce que tu en as pensé. Rien n’est partagé, tout reste chez toi.":"Your rating and what you thought of it. Nothing is shared, everything stays with you.",
   "Supprimer toutes les notes de cet élément":"Delete every rating for this item",
+  "Chargement de la fiche…":"Loading details…",
+  "Déjà dans ta liste — fermer":"Already in your list — close",
   "Notes précédentes":"Earlier ratings", "Note enregistrée":"Rating saved", "Notes supprimées":"Ratings deleted",
   "Nouvelle note ajoutée à l’historique":"New rating added to the history",
   "Ajouter une note plutôt que modifier":"Add a rating instead of editing",
@@ -1778,7 +1787,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
-                fAnnee:"", fReste:"", doublons:null, tirage:null, note:null,
+                fAnnee:"", fReste:"", doublons:null, tirage:null, note:null, apercu:null,
                 panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
                 periodeA:"tout", filtreA:"all", vueA:"date", limiteA:60,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
@@ -1829,7 +1838,7 @@ function dessiner(){
 
   const de = $("#de");
   if(de) de.classList.toggle("hide", !(state.tab === "library" || state.tab === "films") || state.cherche);
-  $("#modal").innerHTML = state.note ? vueNote() : state.tirage ? vueTirage() : "";
+  $("#modal").innerHTML = state.note ? vueNote() : state.apercu ? vueApercu() : state.tirage ? vueTirage() : "";
   traduire($("#modal"));
 
   const chip = $("#ver-chip");
@@ -2970,11 +2979,11 @@ function vueRechercheFilms(){
   const res = state.resF.map(f => {
     const dedans = !!DB.films[f.id];
     return '<div class="card serie">' +
-      '<div class="row" style="flex:1;min-width:0">' + afficheFilm(f) +
+      '<button class="row" style="flex:1;min-width:0" data-act="preview-f" data-id="' + esc(f.id) + '">' + afficheFilm(f) +
       '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
       '<div class="sub">' + esc([f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
       (f.resume ? '<div class="sub" style="-webkit-line-clamp:2;margin-top:4px">' + esc(f.resume) + '</div>' : "") +
-      '</div></div>' +
+      '</div></button>' +
       '<div class="ops">' +
         (dedans
           ? '<span class="opnext fait">Ajouté</span>' +
@@ -2996,7 +3005,108 @@ function vueRechercheFilms(){
       : '<div class="empty"><p>Tape un titre pour chercher un film.</p></div>');
 }
 
-/* ---------- vue : fiche série ---------- */
+/* ============================================================
+   APERÇU AVANT AJOUT
+   Depuis un résultat de recherche, une fenêtre montre tout ce que le
+   catalogue publie — affiche, dates, distribution, synopsis — avant de
+   décider. Rien n'est écrit dans la bibliothèque tant qu'on n'a pas choisi.
+   ============================================================ */
+async function chargerApercu(){
+  const a = state.apercu;
+  if(!a || a.d) return;
+  try{
+    if(a.type === "serie"){
+      const r = await net.get(API + "/shows/" + a.id + "?embed[]=cast&embed[]=crew");
+      if(!r) throw new Error("fiche introuvable");
+      const sh = normShow(r);
+      const emb = r._embedded || {};
+      sh.cast = (emb.cast || []).slice(0, 18).map(x => ({
+        n:(x.person && x.person.name) || "", r:(x.character && x.character.name) || "",
+        p:(x.person && x.person.image && (x.person.image.medium || x.person.image.original)) || null,
+        u:(x.person && x.person.url) || null
+      }));
+      sh.chefs = (emb.crew || []).filter(x => /creator|director/i.test(x.type || "")).slice(0, 4)
+        .map(x => ({ n:(x.person && x.person.name) || "", r:x.type || "", u:(x.person && x.person.url) || null }));
+      a.d = sh;
+    }else{
+      const brut = state.resF.find(x => x.id === a.id) || { id:a.id };
+      const f = { ...(await completerFilm(brut)) };
+      const cle = cleTMDB();
+      if(cle && /^tmdb:/.test(f.id)){
+        try{
+          const c = await jsonLibre("https://api.themoviedb.org/3/movie/" + f.id.slice(5) +
+            "/credits?api_key=" + encodeURIComponent(cle) + "&language=" + LANGUE());
+          f.cast = (c.cast || []).slice(0, 18).map(x => ({
+            n:x.name || "", r:x.character || "",
+            p:x.profile_path ? "https://image.tmdb.org/t/p/w185" + x.profile_path : null,
+            u:"https://www.themoviedb.org/person/" + x.id
+          }));
+          f.chefs = (c.crew || []).filter(x => /^(Director|Screenplay|Writer)$/.test(x.job)).slice(0, 4)
+            .map(x => ({ n:x.name || "", r:x.job === "Director" ? "Réalisation" : "Scénario",
+              u:"https://www.themoviedb.org/person/" + x.id }));
+        }catch(e){ f.cast = []; }
+      }else f.cast = [];
+      a.d = f;
+    }
+  }catch(e){ a.err = String((e && e.message) || e); }
+  if(state.apercu === a) render();
+}
+
+function vueApercu(){
+  const a = state.apercu;
+  if(!a) return "";
+  const film = a.type === "film";
+  const d = a.d;
+  const dedans = film ? !!DB.films[a.id] : !!DB.shows[a.id];
+
+  let corps;
+  if(a.err) corps = '<div class="empty" style="padding:26px 8px"><p>' + esc(a.err) + '</p></div>';
+  else if(!d) corps = '<div class="empty" style="padding:26px 8px"><p>Chargement de la fiche…</p></div>';
+  else if(film){
+    const dd = d.date ? String(d.date).slice(0, 10) : "";
+    corps = '<div class="row" style="padding:0">' +
+      (d.affiche ? '<div class="poster lg" style="background-image:url(' + esc(d.affiche) + ')"></div>'
+                 : '<div class="poster lg"><div class="ph">' + esc((d.titre || "?")[0]) + '</div></div>') +
+      '<div class="info"><h2 style="font-size:19px;line-height:1.15">' + esc(d.titre) + '</h2>' +
+      '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' +
+        (dd ? '<span class="code ' + (dd > todayISO() ? "pass" : "next") + '">' +
+          (dd > todayISO() ? "Sortie prévue le " : "Sorti le ") + esc(frDate(dd, true)) + '</span>'
+            : d.annee ? '<span class="code">' + esc(d.annee) + '</span>' : "") +
+        (d.duree ? '<span class="code">' + d.duree + ' min</span>' : "") + '</div>' +
+      '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc((d.genres || []).join(", ")) + '</div>' +
+      '</div></div>' +
+      (d.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(d.resume) + '</p>' : "") +
+      blocCasting(d);
+  }else{
+    corps = '<div class="row" style="padding:0">' + affiche(d, "lg") +
+      '<div class="info"><h2 style="font-size:19px;line-height:1.15">' + esc(d.name) + '</h2>' +
+      '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' + chipDiffusion(d) +
+        (d.premiered ? '<span class="code">' +
+          (d.premiered > todayISO() ? "Diffusion prévue le " : "Depuis le ") + esc(frDate(d.premiered, true)) + '</span>' : "") +
+        (d.network ? '<span class="code">' + esc(d.network) + '</span>' : "") +
+        (d.runtime ? '<span class="code">' + d.runtime + ' min</span>' : "") + '</div>' +
+      '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc((d.genres || []).join(", ")) + '</div>' +
+      '</div></div>' +
+      (d.summary ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(d.summary) + '</p>' : "") +
+      blocCasting(d);
+  }
+
+  const boutons = dedans
+    ? '<button class="btn full" data-act="ap-fermer">Déjà dans ta liste — fermer</button>'
+    : '<div class="grid2">' +
+        '<button class="btn" data-act="' + (film ? "add-f" : "add") + '" data-id="' + esc(a.id) + '">À voir</button>' +
+        '<button class="btn dv-plein" data-act="' + (film ? "add-f-vu" : "add-vu") + '" data-id="' + esc(a.id) + '">' +
+          (film ? "Déjà vu" : "Déjà vue") + '</button>' +
+      '</div>';
+
+  return '<div class="voile" data-act="ap-fermer"><div class="modal" data-act="rien">' +
+    corps +
+    '<div style="margin-top:14px">' + boutons + '</div>' +
+    '<button class="btn full" style="margin-top:9px" data-act="ap-fermer">Fermer</button>' +
+    '</div></div>';
+}
+
+/* ---------- vue : fiche série ---------- *//* ---------- vue : fiche série ---------- */
 const STATUTS = [["watching","En cours"],["planned","À voir"],["completed","Terminée"],["dropped","Abandonnée"]];
 function vueFiche(sh){
   if(!sh) return "";
@@ -3614,6 +3724,7 @@ document.addEventListener("click", async ev => {
       sauverFilm(fi);
     }
     corbeille = { type:"ajout-film", objet:fi };
+    state.apercu = null;
     render();
     toast("« " + fi.titre + " »" + (act === "add-f-vu" ? " · marqué vu aujourd'hui" : " · à voir"), "annuler-ajout");
     return;
@@ -3876,16 +3987,24 @@ document.addEventListener("click", async ev => {
       autoStatut(cible); toucher(cible); sauverShow(cible);
     }
     corbeille = { type:"ajout-serie", objet:cible };
+    state.apercu = null;
     render();
     toast("« " + cible.name + " »" + (n ? " · " + n + " épisodes marqués vus" : " · à voir"), "annuler-ajout");
     return;
   }
   if(act === "preview"){
-    // Une fiche n'existe que pour une série de ta liste : on ne l'ajoute plus
-    // en douce au simple fait de vouloir la regarder de plus près.
-    if(DB.shows[+id]) ouvrirFiche(+id);
-    else toast("Ajoute-la d'abord, à voir ou déjà vue");
-    return;
+    if(DB.shows[+id]) return ouvrirFiche(+id);
+    state.apercu = { type:"serie", id:+id, d:null, err:null };
+    render(); chargerApercu(); return;
+  }
+  if(act === "preview-f"){
+    if(DB.films[id]) return ouvrirFicheFilm(id);
+    state.apercu = { type:"film", id, d:null, err:null };
+    render(); chargerApercu(); return;
+  }
+  if(act === "ap-fermer"){
+    if(el.classList.contains("voile") && ev.target !== el) return;
+    state.apercu = null; render(); return;
   }
   if(act === "pays"){
     DB.settings.pays = id; sauver(); render();
