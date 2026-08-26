@@ -419,9 +419,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.28.3";
+const VERSION = "1.29.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.29.0", d:"2026-08-26", t:"Cochage en cascade", l:[
+    "Dans une fiche série, cocher un épisode coche aussi tous les précédents encore en attente : après plusieurs épisodes d'affilée, un seul geste suffit.",
+    "Le passage de revisionnage est respecté : au passage 2, la cascade attribue bien un second visionnage à chaque épisode traversé.",
+    "Un message propose « Annuler » dès que la cascade dépasse un épisode, et défait exactement ce qu'elle a coché.",
+    "Décocher ne touche toujours qu'un seul épisode.",
+    "L'ancien bouton « marquer vu jusqu'ici » devient son inverse : « 1 » ne coche que l'épisode choisi, pour un visionnage dans le désordre."
+  ]},
   { v:"1.28.3", d:"2026-08-26", t:"Dates de sortie complètes", l:[
     "L'année était masquée quand la date tombait dans l'année en cours — commode pour un épisode de la semaine, trompeur pour une date de sortie. Elle est désormais toujours affichée sur les fiches.",
     "Un film ou une série pas encore sortis annoncent « Sortie prévue le » plutôt que « Sorti le », au passé.",
@@ -858,6 +865,8 @@ const DICO = {
   "Canada":"Canada", "Royaume-Uni":"United Kingdom", "États-Unis":"United States",
   // réglages : phrases d'explication
   "Marquer S":"Mark S",
+  "Marquer uniquement cet épisode":"Mark only this episode",
+  "Compter un visionnage de plus":"Count one more viewing",
   "Actualiser":"Refresh",
   "Dépose ici le":"Drop here the",
   "ID client OAuth":"OAuth client ID",
@@ -931,7 +940,9 @@ const REGLES = [
   [/^Sortie prévue le (.+)$/,       (m, a) => "Due " + a],
   [/^Diffusion prévue le (.+)$/,    (m, a) => "Airing from " + a],
   [/^Depuis le (.+)$/,              (m, a) => "Since " + a],
-  [/^Jusqu'au (.+)$/,               (m, a) => "Until " + a]
+  [/^Jusqu'au (.+)$/,               (m, a) => "Until " + a],
+  [/^(\d+) épisodes cochés jusqu'à (.+)$/, (m, a, b) => a + " episodes ticked up to " + b],
+  [/^Visionnage n°(\d+) compté$/,   (m, a) => "Viewing no. " + a + " counted"]
 ];
 
 function traduireTexte(t){
@@ -1475,11 +1486,19 @@ function marquer(ep, sh, on){
 function revoirEpisode(ep){
   const v = vues(ep).slice(); v.push(new Date().toISOString()); poser(ep, v); sauver();
 }
+/* Coche l'épisode et tous les précédents encore en attente. Le passage en
+   cours est respecté : au passage 2, un épisode vu une seule fois est
+   considéré comme en attente et reçoit bien son second visionnage.
+   Renvoie la liste de ce qui a réellement changé, pour pouvoir l'annuler. */
 function marquerJusqua(sh, ep){
   const eps = epsOf(sh);
   const idx = eps.findIndex(e => e.i === ep.i);
-  eps.slice(0, idx + 1).filter(diffuse).forEach(e => marquer(e, sh, true));
+  const faits = [];
+  eps.slice(0, idx + 1).filter(diffuse).forEach(e => {
+    if(!vu(e, sh)){ marquer(e, sh, true); faits.push(e.i); }
+  });
   sauver();
+  return faits;
 }
 function nouveauPassage(sh){ sh.pass = passe(sh) + 1; sauverShow(sh); }
 function annulerPassage(sh){
@@ -2761,7 +2780,9 @@ function vueFiche(sh){
           (e.r ? " · " + e.r + " min" : "") + '</div></button>' +
           (nv > 1 ? '<span class="xn" title="' + nv + ' visionnages">&times;' + nv + '</span>' : "") +
           (w2 ? '<button class="plus1" data-act="again" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Compter un visionnage de plus" aria-label="Compter un visionnage de plus">+1</button>'
-              : (diffuse(e) ? '<button class="upto" data-act="upto" data-id="' + sh.id + '" data-ep="' + e.i + '" title="Marquer vu jusqu\'ici" aria-label="Marquer vu jusqu\'ici">' + svg("down", 15) + '</button>' : "")) +
+              : (diffuse(e) ? '<button class="upto" data-act="tick-seul" data-id="' + sh.id + '" data-ep="' + e.i + '" ' +
+                'title="Marquer uniquement cet épisode" aria-label="Marquer uniquement cet épisode">' +
+                '<span class="mono" style="font-size:11px;font-weight:600">1</span></button>' : "")) +
           '<button class="epchk ' + (w2 ? "on" : "") + '" data-act="tick" data-id="' + sh.id + '" data-ep="' + e.i + '" aria-label="Marquer vu">' + svg("check", 17) + '</button>' +
           '</div>' +
           (state.epOuvert === e.i
@@ -3365,15 +3386,26 @@ document.addEventListener("click", async ev => {
   }
   if(act === "close-sheet"){ history.back(); return; }
 
-  if(act === "tick" || act === "upto" || act === "again"){
+  if(act === "tick" || act === "tick-seul" || act === "again"){
     ev.preventDefault();
     const sh = DB.shows[+id]; if(!sh) return;
     const ep = (sh.eps || []).find(x => x.i === +el.dataset.ep); if(!ep) return;
-    if(act === "upto"){ marquerJusqua(sh, ep); toast("Épisodes précédents marqués vus"); }
-    else if(act === "again"){ revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté"); }
-    else marquer(ep, sh, !vu(ep, sh));
+    if(act === "again"){
+      revoirEpisode(ep); toast("Visionnage n°" + nbVues(ep) + " compté");
+    }else if(act === "tick-seul"){
+      marquer(ep, sh, !vu(ep, sh));
+    }else if(vu(ep, sh)){
+      marquer(ep, sh, false);   // décocher ne touche que cet épisode
+    }else{
+      // Cocher entraîne tout ce qui précède et reste en attente : on regarde
+      // rarement un épisode en sautant les précédents.
+      const faits = marquerJusqua(sh, ep);
+      if(faits.length > 1){
+        corbeille = { type:"rattrapage", objet:sh, ids:faits };
+        toast(faits.length + " épisodes cochés jusqu'à S" + p2(ep.s) + "E" + p2(ep.n || 0), "annuler-rattrapage");
+      }
+    }
     toucher(sh);
-
     autoStatut(sh); sauverShow(sh);
     render();
     return;
