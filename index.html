@@ -145,6 +145,16 @@ nav.tabs{
 .ott{display:inline-flex;align-items:center;gap:7px;padding:5px 11px 5px 5px;border-radius:9px;
   background:var(--carte2);border:1px solid var(--trait);font-size:12.5px;color:var(--papier)}
 .ott img{width:22px;height:22px;border-radius:5px;display:block}
+/* Distribution : une bande horizontale, chaque personne mène à sa filmographie. */
+.cast{gap:10px;padding-bottom:6px}
+.pers{width:82px;flex:0 0 82px;text-decoration:none;color:inherit;display:block}
+.pers .ph2{width:82px;height:110px;border-radius:9px;background:var(--carte2) center/cover no-repeat;
+  border:1px solid var(--trait);display:grid;place-items:center;font-family:Archivo;font-size:20px;
+  font-weight:700;color:var(--trait)}
+.pers .nm{font-size:12px;font-weight:600;line-height:1.25;margin-top:6px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.pers .rl{font-size:11px;color:var(--gris);line-height:1.25;margin-top:2px;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 /* Favori : une pastille en coin d'affiche, sans bouton de plus dans la liste. */
 .fav{position:absolute;top:3px;right:4px;z-index:2;font-size:13px;line-height:1;color:var(--or);
   text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.8)}
@@ -409,9 +419,17 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.25.0";
+const VERSION = "1.26.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.26.0", d:"2026-08-26", t:"Distribution et dates de sortie", l:[
+    "Les fiches affichent la distribution : photo, nom et rôle, avec la réalisation ou la création au-dessus.",
+    "Chaque personne mène à sa filmographie complète — TVmaze pour les séries, TMDb pour les films, la même source que les données.",
+    "La distribution est chargée à l'ouverture de la fiche puis conservée ; les fiches déjà consultées ne rappellent rien.",
+    "Date de sortie complète au lieu de la seule année, sur les séries comme sur les films.",
+    "Le dépôt sur Drive ne dépend plus du lancement ni de la fermeture : uniquement des modifications, ce qui est plus propre et plus fiable.",
+    "Quand le délai minimal n'est pas écoulé, le dépôt est reprogrammé au lieu d'être abandonné."
+  ]},
   { v:"1.25.0", d:"2026-08-26", t:"Le dépôt automatique fonctionne vraiment", l:[
     "Le dépôt automatique était éteint faute de valeur par défaut : il s'active désormais dès qu'un compte est relié.",
     "Il ne dépend plus d'un calendrier mais des modifications réelles : rien n'est envoyé si rien n'a changé.",
@@ -875,7 +893,7 @@ function planifier(){
   if(DB.meta) DB.meta.modifie = Date.now();
   clearTimeout(_fl); _fl = setTimeout(ecouler, 150);
   clearTimeout(_cloud);
-  _cloud = setTimeout(() => gdAuto("modification"), 120000);
+  _cloud = setTimeout(gdAuto, 120000);
 }
 let _cloud;
 async function ecouler(){
@@ -1608,6 +1626,79 @@ function chargerOTTPuisRendre(ent, type){
     if(state.detail === cle || state.detailF === cle) render();
   });
 }
+/* Distribution, chargée à l'ouverture de la fiche puis conservée.
+   Les séries viennent de TVmaze, les films de TMDb : dans les deux cas on
+   renvoie vers la fiche de la personne chez la même source, qui porte sa
+   filmographie complète. */
+async function chargerCasting(sh){
+  if(sh.cast) return sh.cast;
+  const gens = [];
+  try{
+    const c = await net.get(API + "/shows/" + sh.id + "/cast");
+    (c || []).slice(0, 18).forEach(x => gens.push({
+      n:(x.person && x.person.name) || "",
+      r:(x.character && x.character.name) || "",
+      p:(x.person && x.person.image && (x.person.image.medium || x.person.image.original)) || null,
+      u:(x.person && x.person.url) || null
+    }));
+  }catch(e){}
+  try{
+    const cr = await net.get(API + "/shows/" + sh.id + "/crew");
+    const chefs = (cr || []).filter(x => /creator|director/i.test(x.type || ""));
+    sh.chefs = chefs.slice(0, 4).map(x => ({ n:(x.person && x.person.name) || "", r:x.type || "",
+      u:(x.person && x.person.url) || null }));
+  }catch(e){}
+  sh.cast = gens;
+  sauverShow(sh);
+  return gens;
+}
+async function chargerCastingFilm(f){
+  if(f.cast) return f.cast;
+  const cle = cleTMDB();
+  if(!cle || !/^tmdb:/.test(f.id)){ f.cast = []; sauverFilm(f); return f.cast; }
+  try{
+    const d = await jsonLibre("https://api.themoviedb.org/3/movie/" + f.id.slice(5) +
+      "/credits?api_key=" + encodeURIComponent(cle) + "&language=" + LANGUE());
+    f.cast = (d.cast || []).slice(0, 18).map(x => ({
+      n:x.name || "", r:x.character || "",
+      p:x.profile_path ? "https://image.tmdb.org/t/p/w185" + x.profile_path : null,
+      u:"https://www.themoviedb.org/person/" + x.id
+    }));
+    f.chefs = (d.crew || []).filter(x => /^(Director|Screenplay|Writer)$/.test(x.job))
+      .slice(0, 4).map(x => ({ n:x.name || "", r:x.job === "Director" ? "Réalisation" : "Scénario",
+        u:"https://www.themoviedb.org/person/" + x.id }));
+  }catch(e){ f.cast = []; }
+  sauverFilm(f);
+  return f.cast;
+}
+function chargerCastingPuisRendre(ent, type){
+  if(!ent || ent.cast) return;
+  const cle = ent.id;
+  (type === "movie" ? chargerCastingFilm(ent) : chargerCasting(ent)).then(() => {
+    if(state.detail === cle || state.detailF === cle) render();
+  });
+}
+function blocCasting(ent){
+  const l = ent.cast;
+  if(l === undefined)
+    return '<div class="eyebrow">Distribution</div><div class="box"><p class="note">Chargement…</p></div>';
+  const chefs = (ent.chefs || []).length
+    ? '<p class="note" style="margin-bottom:9px">' + ent.chefs.map(c =>
+        (c.u ? '<a href="' + esc(c.u) + '" target="_blank" rel="noopener">' + esc(c.n) + '</a>' : esc(c.n)) +
+        ' <span style="opacity:.7">· ' + esc(c.r) + '</span>').join(" — ") + '</p>'
+    : "";
+  if(!l.length)
+    return '<div class="eyebrow">Distribution</div><div class="box">' + chefs +
+      '<p class="note">Aucune distribution publiée pour ce titre.</p></div>';
+  return '<div class="eyebrow">Distribution <b>' + l.length + '</b></div><div class="box">' + chefs +
+    '<div class="chips cast">' + l.map(x =>
+      '<a class="pers" href="' + esc(x.u || "#") + '" target="_blank" rel="noopener" title="Voir sa filmographie">' +
+      (x.p ? '<div class="ph2" style="background-image:url(' + esc(x.p) + ')"></div>'
+           : '<div class="ph2">' + esc((x.n || "?")[0].toUpperCase()) + '</div>') +
+      '<div class="nm">' + esc(x.n) + '</div>' +
+      (x.r ? '<div class="rl">' + esc(x.r) + '</div>' : "") + '</a>').join("") + '</div></div>';
+}
+
 function blocOTT(ent){
   if(!cleTMDB()) return "";
   const o = ent.ott;
@@ -1633,6 +1724,7 @@ function normFilmTMDB(x){
     id:"tmdb:" + x.id,
     titre:x.title || x.original_title || "Sans titre",
     annee:x.release_date ? String(x.release_date).slice(0, 4) : "",
+    date:x.release_date || "",
     affiche:x.poster_path ? "https://image.tmdb.org/t/p/w342" + x.poster_path : null,
     duree:x.runtime || null,
     genres:(x.genres || []).map(g => g.name),
@@ -1684,7 +1776,8 @@ async function relangueFilms(){
       const maj = await completerFilm({ id:f.id });
       if(maj && maj.titre){
         f.titre = maj.titre; f.resume = maj.resume; f.affiche = maj.affiche;
-        f.genres = maj.genres; f.duree = maj.duree; f.annee = maj.annee;
+        f.genres = maj.genres; f.duree = maj.duree; f.annee = maj.annee; f.date = maj.date || f.date;
+        f.cast = undefined; f.chefs = undefined;   // rechargée dans la nouvelle langue
         sauverFilm(f); ok++;
         impr.dire("✓ " + f.titre + (f.titre !== avant ? "   ← " + avant : ""));
       }else impr.dire("✗ " + avant);
@@ -1874,7 +1967,7 @@ function carteFilm(f){
 function vueFicheFilm(f){
   if(!f) return "";
   const n = nbVuesFilm(f);
-  const meta = [f.annee, f.realisateur, (f.genres || []).join(", "), f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ");
+  const meta = [(f.genres || []).join(", "), f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ");
   return '<div class="sheet">' +
     '<div class="sheetnav"><button class="iconbtn" data-act="close-sheet" aria-label="Retour">' + svg("back", 19) + '</button>' +
       '<div style="flex:1;font-family:Archivo;font-weight:600;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(f.titre) + '</div></div>' +
@@ -1882,7 +1975,11 @@ function vueFicheFilm(f){
       (f.affiche ? '<div class="poster lg" style="background-image:url(' + esc(f.affiche) + ')"></div>'
                  : '<div class="poster lg"><div class="ph">' + esc(f.titre[0]) + '</div></div>') +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(f.titre) + '</h2>' +
-      '<div class="sub" style="-webkit-line-clamp:3;margin-top:6px">' + esc(meta) + '</div>' +
+      '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' +
+        (f.date ? '<span class="code next">Sorti le ' + esc(frDate(String(f.date).slice(0, 10))) + '</span>'
+                : f.annee ? '<span class="code">' + esc(f.annee) + '</span>' : "") +
+        (f.duree ? '<span class="code">' + f.duree + ' min</span>' : "") + '</div>' +
+      '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc(meta) + '</div>' +
       (n ? '<div class="mono" style="font-size:11px;color:var(--vu);margin-top:9px">' +
           dureeLongue(n * (f.duree || 100)) + ' de visionnage · ' + n + ' fois</div>'
          : '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:9px">pas encore vu</div>') +
@@ -1894,8 +1991,9 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
-      blocOTT(f) +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
+      blocCasting(f) +
+      blocOTT(f) +
       (n ? '<div class="eyebrow">Visionnages <b>' + n + '</b></div><div class="box">' +
         vuesFilm(f).map((d, k) => '<div class="ep" style="padding:7px 0">' +
           '<span class="code vu">#' + (k + 1) + '</span>' +
@@ -2377,8 +2475,8 @@ function vueFiche(sh){
     '<div class="hero"><div class="row">' + affiche(sh, "lg") +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(sh.name) + '</h2>' +
       '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' + chipDiffusion(sh) +
-        (sh.premiered ? '<span class="code">' + esc(sh.premiered.slice(0, 4) +
-          (sh.ended ? "–" + sh.ended.slice(0, 4) : sh.status === "Running" ? "–" : "")) + '</span>' : "") +
+        (sh.premiered ? '<span class="code">Depuis le ' + esc(frDate(sh.premiered)) + '</span>' : "") +
+        (sh.ended ? '<span class="code">Jusqu\'au ' + esc(frDate(sh.ended)) + '</span>' : "") +
         (sh.network ? '<span class="code">' + esc(sh.network) + '</span>' : "") +
         (sh.runtime ? '<span class="code">' + sh.runtime + ' min</span>' : "") + '</div>' +
       '<div class="sub" style="-webkit-line-clamp:2;margin-top:6px">' + esc((sh.genres || []).join(", ")) + '</div>' +
@@ -2418,8 +2516,9 @@ function vueFiche(sh){
           '<button class="btn" data-act="rewatch" data-id="' + sh.id + '">Revoir depuis le début</button>' +
           (P > 1 ? '<button class="btn dgr" data-act="unwatch" data-id="' + sh.id + '">Annuler le passage ' + P + '</button>' : '<span></span>') +
         '</div></div>' +
-      blocOTT(sh) +
       (sh.summary ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(sh.summary) + '</p>' : "") +
+      blocCasting(sh) +
+      blocOTT(sh) +
       '<div class="eyebrow">Épisodes <b>' + a.total + '</b></div>' +
       '<div class="stack">' + blocsSaisons + '</div>' +
       '<div class="eyebrow">Gestion</div>' +
@@ -2572,9 +2671,8 @@ function vueReglages(){
               esc(gdPourquoiPas() || "modifications en attente, dépôt au prochain déclenchement") + '</div>' : "") +
             '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
               '<div class="info"><div>Dépôt automatique</div>' +
-              '<div class="note">Déclenché au lancement, deux minutes après une modification, et en quittant l\'onglet. ' +
-              'Seulement s\'il y a du neuf, et au plus une fois par demi-heure. ' +
-              'La sortie d\'onglet n\'aboutit pas toujours : le navigateur peut couper un envoi de plusieurs mégaoctets.</div></div>' +
+              '<div class="note">Deux minutes après une modification, et seulement s\'il y a du neuf. ' +
+              'Au plus une fois par demi-heure ; si le délai n\'est pas écoulé, le dépôt est reprogrammé pour le moment où il le sera.</div></div>' +
               '<button class="tg ' + (DB.settings.gdAuto ? "on" : "") + '" data-act="tg" data-k="gdAuto" role="switch" aria-checked="' + !!DB.settings.gdAuto + '"></button></div>' +
             '<button class="btn full dgr" style="margin-top:11px" data-act="gd-deconnecter">Délier ce compte</button>' +
             (gidDuSite()
@@ -3283,6 +3381,7 @@ function ouvrirFicheFilm(id){
   history.pushState({ film:id }, "", "#f" + encodeURIComponent(id));
   render();
   chargerOTTPuisRendre(DB.films[id], "movie");
+  chargerCastingPuisRendre(DB.films[id], "movie");
 }
 function ouvrirFiche(id){
   state.retour = window.scrollY;
@@ -3292,6 +3391,7 @@ function ouvrirFiche(id){
   history.pushState({ fiche:id }, "", "#s" + id);
   render();
   chargerOTTPuisRendre(DB.shows[id], "tv");
+  chargerCastingPuisRendre(DB.shows[id], "tv");
 }
 window.addEventListener("popstate", () => {
   if(state.detail || state.detailF){
@@ -3604,22 +3704,26 @@ function gdDeconnecter(){
   DB.meta.cloud = 0; sauver();
 }
 
-/* Dépôt discret. Deux conditions : quelque chose a changé depuis le dernier
-   dépôt, et le précédent remonte à plus d'une demi-heure. Trois occasions :
-   le lancement, deux minutes après une modification, et la sortie de l'onglet.
-   Cette dernière n'aboutit pas toujours — le navigateur peut interrompre un
-   envoi de plusieurs mégaoctets dès que la page passe en arrière-plan. */
+/* Dépôt discret, déclenché par les modifications et rien d'autre. Deux minutes
+   après le dernier changement, si quelque chose a réellement bougé depuis le
+   dernier envoi, et au plus une fois par demi-heure. Quand ce délai n'est pas
+   écoulé, le dépôt est reprogrammé pour le moment où il le sera : rien ne se
+   perd, y compris les dernières modifications avant de fermer. */
 const CLOUD_MINI = 30 * 60000;
+function gdReste(){ return CLOUD_MINI - (Date.now() - (DB.meta.cloud || 0)); }
 function gdPourquoiPas(){
   if(!gdConnecte()) return "aucun compte relié";
   if(!DB.settings.gdAuto) return "dépôt automatique désactivé";
   if((DB.meta.modifie || 0) <= (DB.meta.cloud || 0)) return "à jour, rien de neuf depuis le dernier dépôt";
-  const reste = CLOUD_MINI - (Date.now() - (DB.meta.cloud || 0));
-  if(reste > 0) return "modifications en attente, prochain dépôt dans " + Math.ceil(reste / 60000) + " min";
+  const r = gdReste();
+  if(r > 0) return "modifications en attente, dépôt dans " + Math.ceil(r / 60000) + " min";
   return null;
 }
-async function gdAuto(raison){
-  if(gdPourquoiPas()) return;
+async function gdAuto(){
+  if(!gdConnecte() || !DB.settings.gdAuto) return;
+  if((DB.meta.modifie || 0) <= (DB.meta.cloud || 0)) return;
+  const r = gdReste();
+  if(r > 0){ clearTimeout(_cloud); _cloud = setTimeout(gdAuto, r + 2000); return; }
   try{
     await gdEnvoyer(false);
     if(state.tab === "reglages" && !state.detail && !state.detailF) render();
@@ -4320,7 +4424,6 @@ async function demarrer(){
   render();
   majQuota();
   setTimeout(majAuto, 2500);
-  setTimeout(() => gdAuto("lancement"), 4000);
 }
 
 // Les comptes à rebours vieillissent : on redessine une fois par minute,
@@ -4332,11 +4435,7 @@ setInterval(() => {
 }, 60000);
 
 // Écriture immédiate quand l'onglet passe en arrière-plan ou se ferme.
-document.addEventListener("visibilitychange", () => {
-  if(document.visibilityState !== "hidden") return;
-  ecouler();
-  gdAuto("sortie");
-});
+document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") ecouler(); });
 window.addEventListener("pagehide", ecouler);
 
 demarrer();
