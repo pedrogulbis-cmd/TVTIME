@@ -155,6 +155,28 @@ nav.tabs{
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .pers .rl{font-size:11px;color:var(--gris);line-height:1.25;margin-top:2px;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+/* Notes : cinq étoiles, chacune coupée en deux moitiés cliquables. */
+.etoiles{display:inline-flex;gap:2px;flex:0 0 auto}
+.et{position:relative;width:22px;height:22px;font-size:20px;line-height:22px;color:var(--trait);flex:0 0 22px}
+.et::before{content:"★"}
+.et i{position:absolute;left:0;top:0;overflow:hidden;color:var(--or);white-space:nowrap;height:100%}
+.et i::before{content:"★"}
+.etoiles.inter .et{width:30px;height:30px;font-size:28px;line-height:30px;flex:0 0 30px}
+.et button{position:absolute;top:0;height:100%;width:50%;opacity:0;cursor:pointer;padding:0;border:0}
+.et button.g{left:0} .et button.d{right:0}
+.note-val{font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:600;color:var(--or)}
+.note-bloc{background:var(--carte2);border:1px solid var(--trait);border-radius:10px;padding:10px 12px;margin:0 0 10px}
+.note-ouvre{display:flex;align-items:center;gap:9px;width:100%;text-align:left}
+.note-vide{font-size:13px;color:var(--gris)}
+.note-crayon{margin-left:auto;font-size:11.5px;color:var(--signal);font-weight:600}
+.note-texte{font-size:13px;line-height:1.6;color:var(--gris);margin:8px 0 0;white-space:pre-wrap}
+.note-hist{margin-top:8px}
+.note-hist>summary{list-style:none;font-size:11.5px;color:var(--gris);cursor:pointer}
+.note-hist>summary::-webkit-details-marker{display:none}
+.note-anc{border-top:1px solid var(--trait);padding-top:8px;margin-top:8px}
+.note-anc-h{display:flex;align-items:center;gap:8px}
+.note-date{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);margin-left:auto}
+.code.etoile{background:rgba(245,196,81,.12);border-color:var(--or);color:var(--or)}
 /* Favori : une pastille en coin d'affiche, sans bouton de plus dans la liste. */
 .fav{position:absolute;top:3px;right:4px;z-index:2;font-size:13px;line-height:1;color:var(--or);
   text-shadow:0 0 3px rgba(0,0,0,.95),0 1px 2px rgba(0,0,0,.8)}
@@ -419,9 +441,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.30.0";
-const SCHEMA  = 3;
+const VERSION = "1.31.0";
+const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.31.0", d:"2026-08-26", t:"Notes et critiques", l:[
+    "Note en demi-étoiles et critique écrite, sur les saisons et sur les films.",
+    "L'historique est conservé : une entrée par passage de revisionnage pour une saison, par visionnage pour un film. Tes notes précédentes restent lisibles sous la note courante.",
+    "L'en-tête de saison porte une pastille dorée quand elle est notée, la fiche série affiche la moyenne de tes saisons notées — annoncée comme telle, jamais présentée comme une note de la série.",
+    "Les épisodes ne sont pas notables : leur ligne est déjà dense, et noter quatorze mille épisodes n'aurait pas de sens.",
+    "Les notes vivent dans un magasin séparé : cocher un épisode ne réécrit jamais tes critiques. Elles sont incluses dans les sauvegardes et le dépôt Drive."
+  ]},
   { v:"1.30.0", d:"2026-08-26", t:"Connexion Drive plus discrète, veille du stockage", l:[
     "L'adresse du compte relié est mémorisée et transmise à Google : le sélecteur de compte ne devrait plus apparaître à chaque dépôt.",
     "Le compte relié s'affiche dans l'encadré Cloud, et il est oublié quand on délie.",
@@ -872,6 +901,12 @@ const DICO = {
   "Canada":"Canada", "Royaume-Uni":"United Kingdom", "États-Unis":"United States",
   // réglages : phrases d'explication
   "Marquer S":"Mark S",
+  "☆ Noter":"☆ Rate", "Modifier":"Edit", "Ta note":"Your rating",
+  "Retirer la note":"Remove rating", "Enregistrer":"Save",
+  "Ce que tu en as pensé…":"What you thought of it…",
+  "Ta note et ce que tu en as pensé. Rien n’est partagé, tout reste chez toi.":"Your rating and what you thought of it. Nothing is shared, everything stays with you.",
+  "Supprimer toutes les notes de cet élément":"Delete every rating for this item",
+  "Notes précédentes":"Earlier ratings", "Note enregistrée":"Rating saved", "Notes supprimées":"Ratings deleted",
   "Marquer uniquement cet épisode":"Mark only this episode",
   "Compter un visionnage de plus":"Count one more viewing",
   "Actualiser":"Refresh",
@@ -952,7 +987,9 @@ const REGLES = [
   [/^Depuis le (.+)$/,              (m, a) => "Since " + a],
   [/^Jusqu'au (.+)$/,               (m, a) => "Until " + a],
   [/^(\d+) épisodes cochés jusqu'à (.+)$/, (m, a, b) => a + " episodes ticked up to " + b],
-  [/^Visionnage n°(\d+) compté$/,   (m, a) => "Viewing no. " + a + " counted"]
+  [/^Visionnage n°(\d+) compté$/,   (m, a) => "Viewing no. " + a + " counted"],
+  [/^(\d+) notes? plus anciennes?$/, (m, a) => a + " earlier rating" + (+a > 1 ? "s" : "")],
+  [/^Moyenne de tes (\d+) saisons notées : (.+) sur 5$/, (m, a, b) => "Average of your " + a + " rated seasons: " + b + " out of 5"]
 ];
 
 function traduireTexte(t){
@@ -1096,7 +1133,7 @@ const net = (() => {
    Les écritures sont granulaires : cocher un épisode écrit un seul
    enregistrement, pas la bibliothèque entière.
    ============================================================ */
-const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, films:{}, settings:{ specials:false, hideEnded:false },
+const DEFAULTS = { version:SCHEMA, shows:{}, watched:{}, films:{}, notes:{}, settings:{ specials:false, hideEnded:false },
                    meta:{ created:Date.now(), vue:null } };
 DEFAULTS.settings.theme = "sombre";
 DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de diffusion
@@ -1108,10 +1145,10 @@ let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
 const IDB = (() => {
-  const NOM = "antenne", V = 2;
+  const NOM = "antenne", V = 3;
   let db = null;
   const prom = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
-  const stores = ["shows", "watched", "kv", "films"];
+  const stores = ["shows", "watched", "kv", "films", "notes"];
   return {
     ouvrir(){
       return new Promise((res, rej) => {
@@ -1123,6 +1160,7 @@ const IDB = (() => {
           if(!d.objectStoreNames.contains("watched")) d.createObjectStore("watched");
           if(!d.objectStoreNames.contains("kv"))      d.createObjectStore("kv");
           if(!d.objectStoreNames.contains("films"))   d.createObjectStore("films", { keyPath:"id" });
+          if(!d.objectStoreNames.contains("notes"))   d.createObjectStore("notes", { keyPath:"k" });
         };
         r.onsuccess = () => { db = r.result; res(db); };
         r.onerror = () => rej(r.error || new Error("ouverture refusée"));
@@ -1131,17 +1169,18 @@ const IDB = (() => {
     },
     async tout(){
       const t = db.transaction(stores, "readonly");
-      const [shows, wk, wv, kk, kvv, films] = await Promise.all([
+      const [shows, wk, wv, kk, kvv, films, notes] = await Promise.all([
         prom(t.objectStore("shows").getAll()),
         prom(t.objectStore("watched").getAllKeys()),
         prom(t.objectStore("watched").getAll()),
         prom(t.objectStore("kv").getAllKeys()),
         prom(t.objectStore("kv").getAll()),
-        prom(t.objectStore("films").getAll())
+        prom(t.objectStore("films").getAll()),
+        prom(t.objectStore("notes").getAll())
       ]);
       const watched = {}; wk.forEach((k, i) => { watched[k] = wv[i]; });
       const kv = {};      kk.forEach((k, i) => { kv[k] = kvv[i]; });
-      return { shows, watched, kv, films };
+      return { shows, watched, kv, films, notes };
     },
     ecrire(lots){
       return new Promise((res, rej) => {
@@ -1149,11 +1188,14 @@ const IDB = (() => {
         t.oncomplete = () => res();
         t.onerror = () => rej(t.error);
         t.onabort  = () => rej(t.error || new Error("écriture annulée"));
-        const S = t.objectStore("shows"), W = t.objectStore("watched"), K = t.objectStore("kv"), F = t.objectStore("films");
+        const S = t.objectStore("shows"), W = t.objectStore("watched"), K = t.objectStore("kv"),
+              F = t.objectStore("films"), N = t.objectStore("notes");
         (lots.shows || []).forEach(sh => S.put(sh));
         (lots.suppr || []).forEach(id => S.delete(Number(id)));
         (lots.films || []).forEach(fi => F.put(fi));
         (lots.supprFilms || []).forEach(id => F.delete(String(id)));
+        (lots.notes || []).forEach(x => N.put(x));
+        (lots.supprNotes || []).forEach(k => N.delete(String(k)));
         Object.keys(lots.vues || {}).forEach(k => { const v = lots.vues[k]; if(v && v.length) W.put(v, k); else W.delete(k); });
         Object.keys(lots.kv || {}).forEach(k => K.put(lots.kv[k], k));
       });
@@ -1169,7 +1211,8 @@ const IDB = (() => {
 })();
 
 /* ---------- file d'écriture ---------- */
-const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), films:new Set(), supprFilms:new Set(), kv:false };
+const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), films:new Set(), supprFilms:new Set(),
+               notes:new Set(), supprNotes:new Set(), kv:false };
 let _fl;
 /* interne = true pour les écritures déclenchées par Antenne elle-même, comme
    l'horodatage d'un dépôt : elles ne doivent pas être comptées comme une
@@ -1185,14 +1228,18 @@ function planifier(interne){
 let _cloud, _cloudQuand = 0;
 async function ecouler(){
   if(!pret) return;
-  if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.films.size && !sale.supprFilms.size && !sale.kv) return;
-  const lots = { shows:[], suppr:[...sale.suppr], vues:{}, films:[], supprFilms:[...sale.supprFilms], kv:{} };
+  if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.films.size &&
+     !sale.supprFilms.size && !sale.notes.size && !sale.supprNotes.size && !sale.kv) return;
+  const lots = { shows:[], suppr:[...sale.suppr], vues:{}, films:[], supprFilms:[...sale.supprFilms],
+                 notes:[], supprNotes:[...sale.supprNotes], kv:{} };
+  sale.notes.forEach(k => { const x = DB.notes[k]; if(x) lots.notes.push(x); });
   sale.shows.forEach(id => { const sh = DB.shows[id]; if(sh) lots.shows.push(sh); });
   sale.films.forEach(id => { const fi = DB.films[id]; if(fi) lots.films.push(fi); });
   sale.vues.forEach(k => { lots.vues[k] = DB.watched[k] || null; });
   if(sale.kv) lots.kv = { settings:DB.settings, meta:DB.meta, version:SCHEMA };
   sale.shows.clear(); sale.suppr.clear(); sale.vues.clear();
-  sale.films.clear(); sale.supprFilms.clear(); sale.kv = false;
+  sale.films.clear(); sale.supprFilms.clear();
+  sale.notes.clear(); sale.supprNotes.clear(); sale.kv = false;
   try{ await IDB.ecrire(lots); stockagePlein = false; }
   catch(e){
     const plein = /quota/i.test(String((e && e.name) || "")) || /quota/i.test(String((e && e.message) || ""));
@@ -1205,10 +1252,12 @@ async function ecouler(){
 function sauver(interne){ sale.kv = true; planifier(interne); }
 function sauverShow(sh){ if(sh) sale.shows.add(String(sh.id)); sale.kv = true; planifier(); }
 function sauverFilm(fi){ if(fi) sale.films.add(String(fi.id)); sale.kv = true; planifier(); }
+function sauverNote(x){ if(x) sale.notes.add(String(x.k)); sale.kv = true; planifier(); }
 function salirVues(k){ sale.vues.add(String(k)); planifier(); }
 function toutSalir(){
   Object.keys(DB.shows).forEach(id => sale.shows.add(id));
   Object.keys(DB.films).forEach(id => sale.films.add(id));
+  Object.keys(DB.notes).forEach(k => sale.notes.add(k));
   Object.keys(DB.watched).forEach(k => sale.vues.add(k));
   sale.kv = true; planifier();
 }
@@ -1218,6 +1267,7 @@ function assembler(k){
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   (k.shows || []).forEach(sh => { if(!sh.pass) sh.pass = 1; d.shows[sh.id] = sh; });
   (k.films || []).forEach(fi => { if(!Array.isArray(fi.vu)) fi.vu = fi.vu ? [fi.vu] : []; d.films[fi.id] = fi; });
+  (k.notes || []).forEach(x => { if(Array.isArray(x.e) && x.e.length) d.notes[x.k] = x; });
   Object.keys(k.watched || {}).forEach(key => {
     const v = k.watched[key];
     const a = Array.isArray(v) ? v : (v ? [v] : []);
@@ -1250,6 +1300,15 @@ function fusionnerSauvegarde(d){
   let ns = 0, nf = 0, ne = 0;
   Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = { pass:1, ...v }; ns++; } });
   Object.entries(d.films || {}).forEach(([k, v]) => { if(!DB.films[k]){ DB.films[k] = v; nf++; } });
+  Object.entries(d.notes || {}).forEach(([k, v]) => {
+    if(!v || !Array.isArray(v.e) || !v.e.length) return;
+    const cur = DB.notes[k];
+    if(!cur){ DB.notes[k] = v; return; }
+    // fusion par horodatage : aucune note n'est écrasée par une autre
+    const vus = new Set(cur.e.map(x => x.q));
+    v.e.forEach(x => { if(!vus.has(x.q)) cur.e.push(x); });
+    cur.e.sort((a, b) => String(a.q).localeCompare(String(b.q)));
+  });
   Object.entries(d.watched || {}).forEach(([k, v]) => {
     const inc = Array.isArray(v) ? v : (v ? [v] : []);
     const cur = Array.isArray(DB.watched[k]) ? DB.watched[k] : (DB.watched[k] ? [DB.watched[k]] : []);
@@ -1537,7 +1596,113 @@ function autoStatut(sh){
     sh.userStatus = "completed";
 }
 
-/* ---------- icônes ---------- */
+/* ============================================================
+   NOTES ET CRITIQUES — saisons et films
+   Chaque note conserve son historique : une entrée par passage de
+   revisionnage pour une saison, par visionnage pour un film. La dernière fait
+   foi, les précédentes restent lisibles pour voir son regard changer.
+   ============================================================ */
+const cleSaison = (shId, s) => "sa:" + shId + ":" + s;
+const cleFilm = id => "fi:" + id;
+
+function entrees(k){ const r = DB.notes[k]; return (r && r.e) || []; }
+function derniereNote(k){ const e = entrees(k); return e.length ? e[e.length - 1] : null; }
+function noteDe(k){ const d = derniereNote(k); return d ? d.n : 0; }
+
+/* p identifie le moment : numéro de passage pour une saison, nombre de
+   visionnages pour un film. Deux notes du même moment se remplacent ;
+   un moment nouveau ajoute une entrée à l'historique. */
+function ecrireNote(k, n, t, p){
+  n = Math.max(0, Math.min(5, Number(n) || 0));
+  t = String(t || "").trim();
+  if(!n && !t){ retirerNote(k); return; }
+  const r = DB.notes[k] || { k, e:[] };
+  const d = r.e.length ? r.e[r.e.length - 1] : null;
+  if(d && d.p === p){ d.n = n; d.t = t; d.q = new Date().toISOString(); }
+  else r.e.push({ q:new Date().toISOString(), n, t, p });
+  DB.notes[k] = r;
+  sauverNote(r);
+}
+function retirerNote(k){
+  delete DB.notes[k];
+  sale.notes.delete(String(k));
+  sale.supprNotes.add(String(k));
+  sauver();
+}
+/* Moyenne de tes propres notes de saisons. Affichée comme telle, jamais
+   présentée comme une note de la série : un tout peut valoir mieux que la
+   somme de ses parties, et masquer l'écart serait mentir. */
+function moyenneSaisons(sh){
+  const l = [...new Set(epsOf(sh).map(e => e.s))]
+    .map(x => noteDe(cleSaison(sh.id, x))).filter(x => x > 0);
+  if(!l.length) return null;
+  return { n:l.reduce((a, b) => a + b, 0) / l.length, nb:l.length };
+}
+const fmtNote = n => (Math.round(n * 10) / 10).toString().replace(".", ",");
+
+/* Cinq étoiles, chacune coupée en deux moitiés cliquables. */
+function etoiles(n, cle){
+  const inter = !!cle;
+  let h = '<div class="etoiles' + (inter ? " inter" : "") + '">';
+  for(let i = 0; i < 5; i++){
+    const rempli = Math.max(0, Math.min(1, n - i)) * 100;
+    h += '<span class="et"><i style="width:' + rempli + '%"></i>' +
+      (inter ? '<button class="g" data-act="note-etoile" data-k="' + esc(cle) + '" data-v="' + (i + 0.5) + '" aria-label="' + (i + 0.5) + ' étoiles"></button>' +
+               '<button class="d" data-act="note-etoile" data-k="' + esc(cle) + '" data-v="' + (i + 1) + '" aria-label="' + (i + 1) + ' étoiles"></button>' : "") +
+      '</span>';
+  }
+  return h + '</div>';
+}
+
+/* Bandeau de note, posé en tête d'une saison ou dans une fiche film. */
+function blocNote(cle, titre, p){
+  const d = derniereNote(cle);
+  const hist = entrees(cle).slice(0, -1).reverse();
+  return '<div class="note-bloc">' +
+    '<button class="note-ouvre" data-act="note-edit" data-k="' + esc(cle) + '" data-titre="' + esc(titre) + '" data-p="' + p + '">' +
+      (d ? etoiles(d.n, "") + '<span class="note-val">' + fmtNote(d.n) + '</span>'
+         : '<span class="note-vide">☆ Noter</span>') +
+      '<span class="note-crayon">Modifier</span>' +
+    '</button>' +
+    (d && d.t ? '<p class="note-texte">' + esc(d.t) + '</p>' : "") +
+    (hist.length
+      ? '<details class="note-hist"><summary>' + hist.length + ' note' + (hist.length > 1 ? "s" : "") + ' plus ancienne' + (hist.length > 1 ? "s" : "") + '</summary>' +
+        hist.map(x => '<div class="note-anc">' +
+          '<div class="note-anc-h">' + etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' +
+          '<span class="note-date">' + frDate(String(x.q).slice(0, 10), true) + '</span></div>' +
+          (x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") + '</div>').join("") +
+        '</details>'
+      : "");
+}
+
+/* Fenêtre d'édition : étoiles, texte, et rappel de l'historique. */
+function vueNote(){
+  const e = state.note;
+  if(!e) return "";
+  const hist = entrees(e.k).slice(0, -1).reverse();
+  return '<div class="voile" data-act="note-fermer"><div class="modal" data-act="rien">' +
+    '<h2>' + esc(e.titre) + '</h2>' +
+    '<p class="note">Ta note et ce que tu en as pensé. Rien n\'est partagé, tout reste chez toi.</p>' +
+    '<div style="display:flex;align-items:center;gap:12px;margin-top:14px">' +
+      etoiles(e.n, e.k) +
+      '<span class="note-val" style="font-size:16px">' + (e.n ? fmtNote(e.n) : "—") + '</span>' +
+      (e.n ? '<button class="btn sm" style="margin-left:auto" data-act="note-zero">Retirer la note</button>' : "") +
+    '</div>' +
+    '<textarea id="note-txt" rows="6" style="margin-top:12px" placeholder="Ce que tu en as pensé…">' + esc(e.t) + '</textarea>' +
+    '<div class="grid2" style="margin-top:12px">' +
+      '<button class="btn" data-act="note-fermer">Annuler</button>' +
+      '<button class="btn pri" data-act="note-ok">Enregistrer</button>' +
+    '</div>' +
+    (hist.length ? '<div class="eyebrow">Notes précédentes <b>' + hist.length + '</b></div>' +
+      hist.map(x => '<div class="note-anc">' +
+        '<div class="note-anc-h">' + etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' +
+        '<span class="note-date">' + frDate(String(x.q).slice(0, 10), true) + '</span></div>' +
+        (x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") + '</div>').join("") : "") +
+    '<button class="btn dgr full" style="margin-top:12px" data-act="note-suppr">Supprimer toutes les notes de cet élément</button>' +
+    '</div></div>';
+}
+
+/* ---------- icônes ---------- *//* ---------- icônes ---------- */
 const ICO = {
   play:'<path d="M5 3.5v17l14-8.5z"/>',
   film:'<rect x="2.5" y="4.5" width="19" height="15" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M7.5 4.5v15M16.5 4.5v15M2.5 12h19M2.5 8.2h5M2.5 15.8h5M16.5 8.2h5M16.5 15.8h5" stroke="currentColor" stroke-width="1.6"/>',
@@ -1556,7 +1721,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
-                fAnnee:"", fReste:"", doublons:null, tirage:null,
+                fAnnee:"", fReste:"", doublons:null, tirage:null, note:null,
                 panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
                 periodeA:"tout", filtreA:"all", vueA:"date", limiteA:60,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
@@ -1607,7 +1772,7 @@ function dessiner(){
 
   const de = $("#de");
   if(de) de.classList.toggle("hide", !(state.tab === "library" || state.tab === "films") || state.cherche);
-  $("#modal").innerHTML = state.tirage ? vueTirage() : "";
+  $("#modal").innerHTML = state.note ? vueNote() : state.tirage ? vueTirage() : "";
   traduire($("#modal"));
 
   const chip = $("#ver-chip");
@@ -1637,6 +1802,7 @@ function dessiner(){
   // On se fie à ce qui est réellement affiché, pas à l'intention.
   const couvert = !!($("#sheet").firstChild || $("#modal").firstChild);
   document.body.style.overflow = couvert ? "hidden" : "";
+  if(state.note){ const z = $("#note-txt"); if(z && document.activeElement !== z) z.value = state.note.t; }
 }
 
 /* ---------- bandes de diffusion (élément signature) ---------- */
@@ -2338,6 +2504,7 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, n) +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
       blocCasting(f) +
       blocOTT(f) +
@@ -2788,11 +2955,14 @@ function vueFiche(sh){
     const tous = w === eps.length;
     return '<details class="season" data-saison="' + s + '" ' + (ouvertes.has(s) ? "open" : "") + '>' +
       '<summary><h3>' + (s === 0 ? "Spéciaux" : "Saison " + s) + '</h3>' +
+      (noteDe(cleSaison(sh.id, s)) ? '<span class="code etoile">★ ' + fmtNote(noteDe(cleSaison(sh.id, s))) + '</span>' : "") +
       '<span class="mono" style="font-size:11px;color:var(--gris)">' + w + '/' + eps.length + '</span>' +
       (w ? '<span class="btn sm" data-act="season-revoir" data-id="' + sh.id + '" data-s="' + s + '" ' +
         'title="Compter un visionnage de plus pour toute la saison">↺</span>' : "") +
       '<span class="btn sm" data-act="season" data-id="' + sh.id + '" data-s="' + s + '" data-on="' + (tous ? 0 : 1) + '">' +
       (tous ? "Tout décocher" : "Tout cocher") + '</span></summary>' +
+      '<div style="padding:11px 11px 1px">' +
+        blocNote(cleSaison(sh.id, s), (s === 0 ? "Spéciaux" : "Saison " + s) + " · " + sh.name, P) + '</div>' +
       eps.map(e => {
         const w2 = vu(e, sh), nv = nbVues(e);
         const der = nv ? vues(e)[nv - 1] : null;
@@ -2838,6 +3008,9 @@ function vueFiche(sh){
       (P > 1 ? ' · <span style="color:var(--signal)">passage ' + P + '</span>' : "") + '</div>' +
       (revuTexte(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(revuTexte(sh).long) + '</div>' : "") +
       (projection(sh) ? '<div class="mono" style="font-size:11px;color:var(--gris);margin-top:3px">' + esc(projection(sh).texte) + '</div>' : "") +
+      (function(){ const m = moyenneSaisons(sh);
+        return m ? '<div class="mono" style="font-size:11px;color:var(--or);margin-top:3px">Moyenne de tes ' + m.nb +
+          ' saisons notées : ' + fmtNote(m.n) + ' sur 5</div>' : ""; })() +
       '</div></div>' +
       (nx ? '<button class="btn pri full" style="margin-top:14px" data-act="tick" data-id="' + sh.id + '" data-ep="' + nx.i + '">' +
         svg("check", 17) + ' Marquer S' + p2(nx.s) + 'E' + p2(nx.n || 0) + ' vu</button>' +
@@ -2965,6 +3138,7 @@ function verifier(){
 function vueReglages(){
   const n = Object.keys(DB.shows).length;
   const nf = Object.keys(DB.films).length;
+  const nn = Object.keys(DB.notes).length;
   const e = Object.values(DB.watched).reduce((t, v) => t + (Array.isArray(v) ? v.length : 1), 0);
   return '<div class="eyebrow">Sauvegarde</div>' +
   '<div class="box"><h3>Exporter</h3><p class="note">Une sauvegarde complète : séries, films, visionnages, statuts. Garde-la, c\'est ton seul filet.</p>' +
@@ -2982,7 +3156,7 @@ function vueReglages(){
       '<button class="btn pri" data-act="export-json">Sauvegarde JSON</button>' +
       '<button class="btn" data-act="export-csv">Épisodes CSV</button></div>' +
     '<button class="btn full" style="margin-top:9px" data-act="export-films">Films CSV</button>' +
-    '<p class="note" style="margin-top:11px">Le JSON est la sauvegarde complète : séries, films, chaque visionnage daté, ' +
+    '<p class="note" style="margin-top:11px">Le JSON est la sauvegarde complète : séries, films, chaque visionnage daté, notes et critiques, ' +
     'passages de revisionnage, favoris, archives, plateformes mémorisées et tous tes réglages. ' +
     'Les deux CSV sont là pour un tableur, pas pour restaurer.</p>' +
     '<p class="note" style="margin-top:7px;color:var(--signal)">Le JSON contient ta clé TMDb : garde-le pour toi.</p></div>' +
@@ -3221,7 +3395,7 @@ function vueReglages(){
   '<div class="eyebrow">Repartir de zéro</div>' +
   '<div class="box" style="border-color:var(--rougeB)">' +
     '<h3 style="color:var(--rouge)">Purger toutes les données</h3>' +
-    '<p class="note">Efface les ' + n + ' séries, les ' + nf + ' films, les ' + e + ' visionnages et les réglages, puis remet Antenne dans son état d\'origine. ' +
+    '<p class="note">Efface les ' + n + ' séries, les ' + nf + ' films, les ' + e + ' visionnages, les ' + nn + ' notes et les réglages, puis remet Antenne dans son état d\'origine. ' +
     'Le thème et le journal des versions sont conservés. Utile pour rejouer un import depuis zéro.</p>' +
     '<p class="note" style="margin-top:7px;color:var(--rouge)">Rien n\'est récupérable ensuite. Exporte d\'abord si tu tiens à quelque chose.</p>' +
     '<button class="btn full dgr" style="margin-top:11px" data-act="wipe">' + svg("poubelle", 16) + ' Purger toutes les données</button>' +
@@ -3250,6 +3424,47 @@ document.addEventListener("click", async ev => {
     return;
   }
   if(act === "rien"){ ev.stopPropagation(); return; }
+  if(act === "note-edit"){
+    const k = el.dataset.k, d = derniereNote(k);
+    const p = +el.dataset.p || 1;
+    // Une note posée à un autre moment ouvre une nouvelle entrée : on part du
+    // texte précédent pour pouvoir l'amender, sans l'écraser.
+    state.note = { k, titre:el.dataset.titre, p, n:d ? d.n : 0, t:d ? d.t : "" };
+    render(); return;
+  }
+  if(act === "note-etoile"){
+    if(!state.note) return;
+    const v = Number(el.dataset.v);
+    state.note.n = state.note.n === v ? v - 0.5 : v;   // retaper la même moitié retire un demi-cran
+    const z = $("#note-txt"); if(z) state.note.t = z.value;
+    render(); return;
+  }
+  if(act === "note-zero"){
+    if(!state.note) return;
+    const z = $("#note-txt"); if(z) state.note.t = z.value;
+    state.note.n = 0; render(); return;
+  }
+  if(act === "note-ok"){
+    if(!state.note) return;
+    const z = $("#note-txt");
+    const e = state.note;
+    ecrireNote(e.k, e.n, z ? z.value : e.t, e.p);
+    state.note = null; render();
+    toast("Note enregistrée");
+    return;
+  }
+  if(act === "note-suppr"){
+    if(!state.note) return;
+    if(!confirm("Supprimer la note et toutes les critiques de cet élément ?\n\nL'historique des passages précédents sera perdu.")) return;
+    retirerNote(state.note.k);
+    state.note = null; render();
+    toast("Notes supprimées");
+    return;
+  }
+  if(act === "note-fermer"){
+    if(el.classList.contains("voile") && ev.target !== el) return;
+    state.note = null; render(); return;
+  }
   if(act === "tirage"){
     state.tirage = { type:state.tab === "films" ? "films" : "series", duree:0, fav:false, id:null };
     tirer(); render(); return;
@@ -3743,6 +3958,7 @@ document.addEventListener("click", async ev => {
     try{ await IDB.vider(); }catch(e){}
     localStorage.removeItem(LS);
     DB = JSON.parse(JSON.stringify(DEFAULTS)); DB.meta.vue = VERSION; DB.settings.theme = themeActuel();
+    sale.notes.clear(); sale.supprNotes.clear();
     sale.shows.clear(); sale.suppr.clear(); sale.vues.clear(); sauver();
     state.filtre = DEFAULTS.settings.filtre; state.tri = DEFAULTS.settings.tri;
     state.filtreF = "all"; state.triF = "activite"; state.qlF = ""; state.limiteF = PAGE; state.detailF = null; state.ql = state.genre = state.plateforme = state.diffusion = "";
