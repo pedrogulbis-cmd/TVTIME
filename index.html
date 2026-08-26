@@ -409,9 +409,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.24.0";
+const VERSION = "1.25.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.25.0", d:"2026-08-26", t:"Le dépôt automatique fonctionne vraiment", l:[
+    "Le dépôt automatique était éteint faute de valeur par défaut : il s'active désormais dès qu'un compte est relié.",
+    "Il ne dépend plus d'un calendrier mais des modifications réelles : rien n'est envoyé si rien n'a changé.",
+    "Trois occasions de déclenchement : le lancement, deux minutes après une modification, et la sortie de l'onglet.",
+    "Le délai minimal entre deux dépôts passe de vingt heures à trente minutes.",
+    "L'encadré Cloud dit en clair pourquoi rien ne part : à jour, en attente, ou compte non relié."
+  ]},
   { v:"1.24.0", d:"2026-08-25", t:"Identifiants du site", l:[
     "Deux constantes en tête du fichier permettent au propriétaire du site de fournir l'identifiant Google et la clé TMDb pour tous ses visiteurs.",
     "Renseignées, elles font disparaître toute configuration : un visiteur n'a plus qu'à relier son compte Google.",
@@ -674,7 +681,7 @@ const JOURNAL = [
    que chacun renseigne la sienne dans les Réglages.
    ============================================================ */
 const GID_SITE  = "60704834299-4ob96jl0b04i02h3d2jo6dd6pfu14dqo.apps.googleusercontent.com";   // 1234567890-xxxx.apps.googleusercontent.com
-const TMDB_SITE = "6f91dcce06fdfc310afd226ac2789b90";   // clé API TMDb — quota partagé, à tes risques
+const TMDB_SITE = "";   // clé API TMDb — quota partagé, à tes risques
 
 const CFG = { gid:GID_SITE, tmdb:TMDB_SITE };
 
@@ -794,6 +801,7 @@ DEFAULTS.settings.tri = "recent";   // à défaut de choix : tri par date de dif
 DEFAULTS.settings.filtre = "all";
 DEFAULTS.settings.langue = "fr";
 DEFAULTS.settings.pays = "FR";
+DEFAULTS.settings.gdAuto = true;   // dépôt automatique actif dès qu'un compte est relié
 let DB = JSON.parse(JSON.stringify(DEFAULTS));
 let pret = false;
 
@@ -861,7 +869,15 @@ const IDB = (() => {
 /* ---------- file d'écriture ---------- */
 const sale = { shows:new Set(), suppr:new Set(), vues:new Set(), films:new Set(), supprFilms:new Set(), kv:false };
 let _fl;
-function planifier(){ clearTimeout(_fl); _fl = setTimeout(ecouler, 150); }
+function planifier(){
+  // On note qu'il y a du neuf : c'est ce qui décidera d'un dépôt sur Drive,
+  // plutôt qu'un simple calendrier qui sauvegarderait pour rien.
+  if(DB.meta) DB.meta.modifie = Date.now();
+  clearTimeout(_fl); _fl = setTimeout(ecouler, 150);
+  clearTimeout(_cloud);
+  _cloud = setTimeout(() => gdAuto("modification"), 120000);
+}
+let _cloud;
 async function ecouler(){
   if(!pret) return;
   if(!sale.shows.size && !sale.suppr.size && !sale.vues.size && !sale.films.size && !sale.supprFilms.size && !sale.kv) return;
@@ -2552,10 +2568,13 @@ function vueReglages(){
               '<button class="btn pri" data-act="gd-envoyer">' + (gdConnecte() ? "Sauvegarder" : "Relier et sauvegarder") + '</button>' +
               '<button class="btn" data-act="gd-recuperer">Restaurer</button>' +
             '</div>' +
+            (gdConnecte() ? '<div class="mono" style="font-size:11px;margin-top:5px;color:var(--gris)">' +
+              esc(gdPourquoiPas() || "modifications en attente, dépôt au prochain déclenchement") + '</div>' : "") +
             '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
               '<div class="info"><div>Dépôt automatique</div>' +
-              '<div class="note">Au lancement et en quittant l\'onglet, au plus une fois par vingt heures. ' +
-              'Un site web ne peut rien faire quand il est fermé : la sauvegarde a lieu quand tu ouvres Antenne.</div></div>' +
+              '<div class="note">Déclenché au lancement, deux minutes après une modification, et en quittant l\'onglet. ' +
+              'Seulement s\'il y a du neuf, et au plus une fois par demi-heure. ' +
+              'La sortie d\'onglet n\'aboutit pas toujours : le navigateur peut couper un envoi de plusieurs mégaoctets.</div></div>' +
               '<button class="tg ' + (DB.settings.gdAuto ? "on" : "") + '" data-act="tg" data-k="gdAuto" role="switch" aria-checked="' + !!DB.settings.gdAuto + '"></button></div>' +
             '<button class="btn full dgr" style="margin-top:11px" data-act="gd-deconnecter">Délier ce compte</button>' +
             (gidDuSite()
@@ -3133,6 +3152,7 @@ document.addEventListener("click", async ev => {
     if(j){ j.classList.remove("hide"); j.textContent = "Autorisation Google…\n"; }
     try{
       const n = await gdEnvoyer(!gdConnecte());
+      if(DB.settings.gdAuto === undefined) DB.settings.gdAuto = true;
       if(j) j.textContent += "Sauvegarde déposée : " + ko(n) + "\n";
       render(); toast("Sauvegarde déposée sur Drive");
     }catch(e){
@@ -3584,15 +3604,26 @@ function gdDeconnecter(){
   DB.meta.cloud = 0; sauver();
 }
 
-/* Sauvegarde discrète : au lancement et quand on quitte l'onglet, jamais plus
-   d'une fois par vingt heures, et uniquement si le jeton s'obtient en silence. */
+/* Dépôt discret. Deux conditions : quelque chose a changé depuis le dernier
+   dépôt, et le précédent remonte à plus d'une demi-heure. Trois occasions :
+   le lancement, deux minutes après une modification, et la sortie de l'onglet.
+   Cette dernière n'aboutit pas toujours — le navigateur peut interrompre un
+   envoi de plusieurs mégaoctets dès que la page passe en arrière-plan. */
+const CLOUD_MINI = 30 * 60000;
+function gdPourquoiPas(){
+  if(!gdConnecte()) return "aucun compte relié";
+  if(!DB.settings.gdAuto) return "dépôt automatique désactivé";
+  if((DB.meta.modifie || 0) <= (DB.meta.cloud || 0)) return "à jour, rien de neuf depuis le dernier dépôt";
+  const reste = CLOUD_MINI - (Date.now() - (DB.meta.cloud || 0));
+  if(reste > 0) return "modifications en attente, prochain dépôt dans " + Math.ceil(reste / 60000) + " min";
+  return null;
+}
 async function gdAuto(raison){
-  if(!DB.settings.gdAuto || !gdConnecte()) return;
-  if(Date.now() - (DB.meta.cloud || 0) < 20 * 3600000) return;
+  if(gdPourquoiPas()) return;
   try{
-    const n = await gdEnvoyer(false);
-    if(n && raison === "lancement" && state.tab === "reglages") render();
-  }catch(e){ /* silence : l'utilisateur relancera à la main si besoin */ }
+    await gdEnvoyer(false);
+    if(state.tab === "reglages" && !state.detail && !state.detailF) render();
+  }catch(e){ /* silence : le dépôt manuel reste disponible */ }
 }
 
 /* ---------- CSV : lecture ---------- */
