@@ -409,9 +409,23 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.22.0";
+const VERSION = "1.24.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.24.0", d:"2026-08-25", t:"Identifiants du site", l:[
+    "Deux constantes en tête du fichier permettent au propriétaire du site de fournir l'identifiant Google et la clé TMDb pour tous ses visiteurs.",
+    "Renseignées, elles font disparaître toute configuration : un visiteur n'a plus qu'à relier son compte Google.",
+    "Chaque visiteur sauvegarde dans son propre Drive ; le site n'y a aucun accès, l'autorisation ne quitte jamais son navigateur.",
+    "Un identifiant personnel reste possible et prend le pas sur celui du site.",
+    "Aucun chiffrement de façade : un identifiant client OAuth est public par nature, seule la liste des origines autorisées le protège."
+  ]},
+  { v:"1.23.0", d:"2026-08-25", t:"Sauvegarde dans Google Drive", l:[
+    "Nouvel encadré Cloud dans les Réglages : Antenne dépose sa sauvegarde dans un dossier de ton Drive et sait la reprendre ailleurs.",
+    "Dépôt automatique au lancement et en quittant l'onglet, au plus une fois par vingt heures.",
+    "La restauration fusionne sans rien écraser : aucun visionnage n'est perdu, les listes de dates sont réunies.",
+    "Portée d'accès limitée aux fichiers créés par Antenne : le reste de ton Drive lui est invisible.",
+    "Nécessite un identifiant client OAuth propre à ton installation, à créer une fois dans la console Google."
+  ]},
   { v:"1.22.0", d:"2026-08-25", t:"Ajouter à voir ou déjà vu", l:[
     "Les résultats de recherche proposent deux boutons au lieu d'un : « À voir » et « Déjà vu ».",
     "« Déjà vue » sur une série marque d'un coup tous les épisodes diffusés, sans avoir à ouvrir la fiche ensuite.",
@@ -643,6 +657,27 @@ const JOURNAL = [
    Le choix est doublé dans localStorage pour être appliqué dès la première
    ligne exécutée : la base IndexedDB s'ouvre en asynchrone, et sans ce doublon
    la page clignoterait en sombre avant de passer en clair.               */
+/* ============================================================
+   IDENTIFIANTS DU SITE — à renseigner une fois, ici même
+   ------------------------------------------------------------
+   Remplis ces deux lignes et tes visiteurs n'auront plus rien à créer :
+   un clic sur « Relier Google Drive » leur suffira, et chacun sauvegardera
+   dans SON propre Drive, jamais dans le tien.
+
+   Ce ne sont pas des secrets cachés : un identifiant client OAuth est public
+   par conception, il s'affiche dans l'URL de la fenêtre de consentement.
+   Ce qui empêche de s'en servir ailleurs, c'est la liste des « Origines
+   JavaScript autorisées » déclarée dans la console Google.
+
+   La clé TMDb, elle, est un vrai jeton de quota : la publier revient à
+   partager ton quota avec tous les visiteurs. Laisse-la vide si tu préfères
+   que chacun renseigne la sienne dans les Réglages.
+   ============================================================ */
+const GID_SITE  = "60704834299-4ob96jl0b04i02h3d2jo6dd6pfu14dqo.apps.googleusercontent.com";   // 1234567890-xxxx.apps.googleusercontent.com
+const TMDB_SITE = "6f91dcce06fdfc310afd226ac2789b90";   // clé API TMDb — quota partagé, à tes risques
+
+const CFG = { gid:GID_SITE, tmdb:TMDB_SITE };
+
 const LSTHEME = "antenne.theme";
 const THEMES = [["sombre", "Sombre"], ["clair", "Clair"], ["auto", "Système"]];
 const media = window.matchMedia ? window.matchMedia("(prefers-color-scheme: light)") : null;
@@ -879,6 +914,28 @@ async function reprendreLocalStorage(){
     settings:d.settings || {}, version:SCHEMA,
     meta:{ ...(d.meta || {}), repris:new Date().toISOString() } } });
   return shows.length;
+}
+
+/* Fusion d'une sauvegarde, jamais destructive : rien n'est écrasé, seules les
+   entrées absentes sont ajoutées et les listes de visionnages réunies. */
+function fusionnerSauvegarde(d){
+  if(!d || !d.shows) throw new Error("format inattendu");
+  let ns = 0, nf = 0, ne = 0;
+  Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = { pass:1, ...v }; ns++; } });
+  Object.entries(d.films || {}).forEach(([k, v]) => { if(!DB.films[k]){ DB.films[k] = v; nf++; } });
+  Object.entries(d.watched || {}).forEach(([k, v]) => {
+    const inc = Array.isArray(v) ? v : (v ? [v] : []);
+    const cur = Array.isArray(DB.watched[k]) ? DB.watched[k] : (DB.watched[k] ? [DB.watched[k]] : []);
+    const fus = [...new Set([...cur, ...inc])].sort();
+    if(fus.length > cur.length){ ne += fus.length - cur.length; DB.watched[k] = fus; }
+  });
+  if(d.settings) ["tmdb","langue","pays","gid"].forEach(k => {
+    if(d.settings[k] && !DB.settings[k]) DB.settings[k] = d.settings[k];
+  });
+  Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
+  Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
+  toutSalir(); render();
+  return { ns, nf, ne };
 }
 
 /* ---------- fraîcheur de la sauvegarde ---------- */
@@ -1479,7 +1536,8 @@ async function jsonLibre(url){
   if(!r.ok) throw new Error("HTTP " + r.status);
   return r.json();
 }
-const cleTMDB = () => (DB.settings && DB.settings.tmdb || "").trim();
+const cleTMDB = () => ((DB.settings && DB.settings.tmdb) || CFG.tmdb || "").trim();
+const tmdbDuSite = () => !!(CFG.tmdb && !(DB.settings && DB.settings.tmdb));
 const LANGUES = [["fr", "Français"], ["en", "English"]];
 const LANGUE = () => ((DB.settings && DB.settings.langue) === "en" ? "en-US" : "fr-FR");
 const langueNom = () => (LANGUE() === "en-US" ? "anglais" : "français");
@@ -2469,6 +2527,52 @@ function vueReglages(){
     '<label class="btn full" style="margin-top:11px">Choisir un fichier JSON' +
       '<input type="file" accept=".json,application/json" id="f-json" class="hide"></label></div>' +
 
+  '<div class="box" style="margin-top:9px"><h3>Cloud</h3>' +
+    (!gdClient()
+      ? '<p class="note">Antenne peut déposer sa sauvegarde dans ton Google Drive et la reprendre sur un autre appareil. ' +
+        'Il faut pour cela un identifiant client OAuth, gratuit, propre à ton installation :</p>' +
+        '<p class="note" style="margin-top:7px">1. console.cloud.google.com → nouveau projet<br>' +
+        '2. API et services → Bibliothèque → activer <b>Google Drive API</b><br>' +
+        '3. Identifiants → Créer → <b>ID client OAuth</b> → Application Web<br>' +
+        '4. Dans « Origines JavaScript autorisées », colle l\'adresse de ce site :<br>' +
+        '<span class="mono" style="color:var(--papier);word-break:break-all">' + esc(location.origin) + '</span><br>' +
+        '5. Écran de consentement : mode Test, et ajoute ton adresse Gmail en utilisateur de test</p>' +
+        '<div class="search" style="margin-top:11px"><input id="cle-gid" type="text" spellcheck="false" ' +
+          'placeholder="…apps.googleusercontent.com" autocomplete="off" value=""></div>'
+      : (function(){
+          const q = DB.meta.cloud
+            ? (function(){ const j = Math.floor((Date.now() - DB.meta.cloud) / 86400000);
+                return j === 0 ? "aujourd\'hui" : j === 1 ? "hier" : "il y a " + j + " jours"; })()
+            : null;
+          return '<p class="note">Sauvegarde déposée dans le dossier <b>' + esc(gdNomDossier()) + '</b> de ton Drive, ' +
+            'sous le nom <span class="mono">' + GD_FICHIER + '</span>. Antenne ne voit que ce fichier, rien d\'autre de ton Drive.</p>' +
+            '<div class="mono" style="font-size:11px;margin-top:9px;color:' + (gdConnecte() ? "var(--vu)" : "var(--gris)") + '">' +
+              (gdConnecte() ? "Relié · dernier dépôt " + q : "Identifiant enregistré, pas encore relié") + '</div>' +
+            '<div class="grid2" style="margin-top:11px">' +
+              '<button class="btn pri" data-act="gd-envoyer">' + (gdConnecte() ? "Sauvegarder" : "Relier et sauvegarder") + '</button>' +
+              '<button class="btn" data-act="gd-recuperer">Restaurer</button>' +
+            '</div>' +
+            '<div class="sw" style="border-top:1px solid var(--trait);margin-top:11px">' +
+              '<div class="info"><div>Dépôt automatique</div>' +
+              '<div class="note">Au lancement et en quittant l\'onglet, au plus une fois par vingt heures. ' +
+              'Un site web ne peut rien faire quand il est fermé : la sauvegarde a lieu quand tu ouvres Antenne.</div></div>' +
+              '<button class="tg ' + (DB.settings.gdAuto ? "on" : "") + '" data-act="tg" data-k="gdAuto" role="switch" aria-checked="' + !!DB.settings.gdAuto + '"></button></div>' +
+            '<button class="btn full dgr" style="margin-top:11px" data-act="gd-deconnecter">Délier ce compte</button>' +
+            (gidDuSite()
+              ? '<p class="note" style="margin-top:11px;padding-top:11px;border-top:1px solid var(--trait)">' +
+                'La connexion passe par l\'identifiant du site. Ta sauvegarde va dans <b>ton</b> Drive, ' +
+                'et le site n\'y a aucun accès : chaque navigateur obtient sa propre autorisation, qu\'il est seul à détenir.</p>' +
+                '<details class="season" style="margin-top:9px;background:transparent">' +
+                  '<summary><h3>Utiliser mon propre identifiant</h3></summary>' +
+                  '<div style="padding:11px">' +
+                    '<p class="note">Facultatif. Un identifiant client OAuth personnel remplace celui du site.</p>' +
+                    '<div class="search" style="margin-top:9px"><input id="cle-gid" type="text" spellcheck="false" ' +
+                      'placeholder="…apps.googleusercontent.com" autocomplete="off" value=""></div>' +
+                  '</div></details>'
+              : "");
+        })()) +
+    '<div class="log hide" id="gd-log"></div></div>' +
+
   '<div class="eyebrow">Reprendre TV Time</div>' +
   '<div class="box"><h3>Importer l\'archive TV Time</h3>' +
     '<p class="note">Dépose ici le <b>.zip</b> reçu de TV Time (Profil → Paramètres → export de tes données). ' +
@@ -2518,12 +2622,16 @@ function vueReglages(){
 
   '<div class="eyebrow">Films</div>' +
   '<div class="box"><h3>Clé TMDb</h3>' +
-    '<p class="note">La recherche de films passe par TMDb. La clé est gratuite : compte sur themoviedb.org, puis Paramètres → API. ' +
-    'Elle reste dans ce navigateur et n\'est envoyée qu\'à TMDb.</p>' +
+    '<p class="note">' + (tmdbDuSite()
+      ? 'Ce site fournit sa propre clé : la recherche de films fonctionne sans rien configurer. Tu peux la remplacer par la tienne ci-dessous.'
+      : 'La recherche de films passe par TMDb. La clé est gratuite : compte sur themoviedb.org, puis Paramètres → API. ' +
+        'Elle reste dans ce navigateur et n\'est envoyée qu\'à TMDb.') + '</p>' +
     '<div class="search" style="margin-top:11px"><input id="cle-tmdb" type="text" placeholder="Clé API TMDb (facultatif)" ' +
       'autocomplete="off" spellcheck="false" value="' + esc(DB.settings.tmdb || "") + '"></div>' +
     '<div class="mono" style="font-size:11px;color:' + (cleTMDB() ? "var(--vu)" : "var(--gris)") + ';margin-top:8px">' +
-      (cleTMDB() ? "Clé enregistrée — recherche de films active" : "Aucune clé : la recherche de films est désactivée") + '</div>' +
+      (tmdbDuSite() ? "Clé fournie par le site — recherche de films active"
+        : cleTMDB() ? "Clé enregistrée — recherche de films active"
+        : "Aucune clé : la recherche de films est désactivée") + '</div>' +
 
     '<div style="font-size:13.5px;margin:16px 0 8px;padding-top:14px;border-top:1px solid var(--trait)">Langue des films</div>' +
     '<div class="seg">' + LANGUES.map(([id, l]) =>
@@ -3020,6 +3128,40 @@ document.addEventListener("click", async ev => {
   if(act === "tg"){
     DB.settings[el.dataset.k] = !DB.settings[el.dataset.k]; sauver(); render(); return;
   }
+  if(act === "gd-envoyer"){
+    const j = $("#gd-log");
+    if(j){ j.classList.remove("hide"); j.textContent = "Autorisation Google…\n"; }
+    try{
+      const n = await gdEnvoyer(!gdConnecte());
+      if(j) j.textContent += "Sauvegarde déposée : " + ko(n) + "\n";
+      render(); toast("Sauvegarde déposée sur Drive");
+    }catch(e){
+      if(j) j.textContent += "Échec : " + (e && e.message || e) + "\n";
+      toast("Dépôt impossible");
+    }
+    return;
+  }
+  if(act === "gd-recuperer"){
+    const j = $("#gd-log");
+    if(j){ j.classList.remove("hide"); j.textContent = "Lecture de la sauvegarde…\n"; }
+    try{
+      const d = await gdRecuperer(!gdConnecte());
+      if((d.schema || 1) > SCHEMA && !confirm("Cette sauvegarde vient d'une version plus récente d'Antenne. Continuer ?")) return;
+      const b = fusionnerSauvegarde(d);
+      if(j) j.textContent += b.ns + " séries, " + b.nf + " films, " + b.ne + " visionnages repris" +
+        (d.exportedAt ? "\nDéposée le " + frDate(String(d.exportedAt).slice(0, 10)) : "") + "\n";
+      toast(b.ns + " séries et " + b.ne + " visionnages repris");
+    }catch(e){
+      if(j) j.textContent += "Échec : " + (e && e.message || e) + "\n";
+      toast("Restauration impossible");
+    }
+    return;
+  }
+  if(act === "gd-deconnecter"){
+    if(!confirm("Délier ce compte Google ?\n\nLa sauvegarde déjà déposée reste dans ton Drive, Antenne cesse simplement de s'en servir.")) return;
+    gdDeconnecter(); render(); toast("Compte délié");
+    return;
+  }
   if(act === "export-json") return exportJSON();
   if(act === "export-csv")  return exportCSV();
   if(act === "export-films") return exportFilms();
@@ -3198,6 +3340,17 @@ document.addEventListener("toggle", ev => {
 })();
 
 /* ---------- recherche live ---------- */
+let _gid;
+document.addEventListener("input", ev => {
+  if(ev.target.id !== "cle-gid") return;
+  const v = ev.target.value.trim();
+  clearTimeout(_gid);
+  _gid = setTimeout(() => {
+    DB.settings.gid = v; sauver(); render();
+    if(v) toast("Identifiant enregistré — relie ton compte");
+  }, 700);
+});
+
 let _cle;
 document.addEventListener("input", ev => {
   if(ev.target.id !== "cle-tmdb") return;
@@ -3288,6 +3441,158 @@ function exportCSV(){
   }));
   telecharger("antenne-v" + VERSION + "-episodes-" + todayISO() + ".csv", l.join("\n"), "text/csv;charset=utf-8");
   toast(l.length - 1 + " visionnages exportés");
+}
+
+/* ============================================================
+   SAUVEGARDE VERS GOOGLE DRIVE
+   Flux OAuth « jeton » de Google Identity Services : pas de secret côté
+   client, pas de jeton de rafraîchissement. L'autorisation dure environ une
+   heure, puis se renouvelle sans rien demander tant que la session Google est
+   active et le consentement déjà donné.
+   Portée drive.file : Antenne ne voit que les fichiers qu'elle a créés.
+   ============================================================ */
+const GD = { jeton:null, expire:0, client:null, attente:[], enCours:false };
+const gdClient = () => ((DB.settings && DB.settings.gid) || CFG.gid || "").trim();
+const gidDuSite = () => !!(CFG.gid && !(DB.settings && DB.settings.gid));
+const gdConnecte = () => !!(gdClient() && DB.settings.gdFichier);
+
+function chargerGIS(){
+  if(window.google && google.accounts && google.accounts.oauth2) return Promise.resolve();
+  if(GD.chargement) return GD.chargement;
+  GD.chargement = new Promise((res, rej) => {
+    const b = document.createElement("script");
+    b.src = "https://accounts.google.com/gsi/client";
+    b.async = true; b.defer = true;
+    b.onload = () => res();
+    b.onerror = () => rej(new Error("bibliothèque Google injoignable"));
+    document.head.appendChild(b);
+  });
+  return GD.chargement;
+}
+
+/* interactif = true ouvre la fenêtre de consentement ; false tente en silence */
+async function gdJeton(interactif){
+  if(GD.jeton && Date.now() < GD.expire - 60000) return GD.jeton;
+  if(!gdClient()) throw new Error("identifiant client absent");
+  await chargerGIS();
+  return new Promise((res, rej) => {
+    if(!GD.client){
+      GD.client = google.accounts.oauth2.initTokenClient({
+        client_id: gdClient(),
+        scope: "https://www.googleapis.com/auth/drive.file",
+        callback: r => {
+          if(r && r.access_token){
+            GD.jeton = r.access_token;
+            GD.expire = Date.now() + ((r.expires_in || 3600) * 1000);
+            GD.attente.forEach(f => f.res(GD.jeton));
+          }else{
+            GD.attente.forEach(f => f.rej(new Error("autorisation refusée")));
+          }
+          GD.attente = [];
+        },
+        error_callback: e => {
+          GD.attente.forEach(f => f.rej(new Error((e && (e.type || e.message)) || "autorisation impossible")));
+          GD.attente = [];
+        }
+      });
+    }
+    GD.attente.push({ res, rej });
+    try{ GD.client.requestAccessToken({ prompt: interactif ? "consent" : "" }); }
+    catch(e){ GD.attente = []; rej(e); }
+  });
+}
+
+async function gdAppel(url, opts, interactif){
+  const t = await gdJeton(!!interactif);
+  const o = opts || {};
+  const r = await fetch(url, { ...o, headers:{ Authorization:"Bearer " + t, ...(o.headers || {}) } });
+  if(r.status === 401){ GD.jeton = null; throw new Error("session expirée"); }
+  if(!r.ok) throw new Error("Drive " + r.status + " " + (await r.text()).slice(0, 120));
+  return r;
+}
+
+const GD_FICHIER = "antenne-sauvegarde.json";
+const gdNomDossier = () => (DB.settings.gdNom || "Antenne").replace(/['\\]/g, "");
+
+async function gdDossier(interactif){
+  if(DB.settings.gdDossier) return DB.settings.gdDossier;
+  const q = "mimeType='application/vnd.google-apps.folder' and name='" + gdNomDossier() + "' and trashed=false";
+  const r = await gdAppel("https://www.googleapis.com/drive/v3/files?fields=files(id)&q=" + encodeURIComponent(q), null, interactif);
+  const d = await r.json();
+  let id = d.files && d.files[0] && d.files[0].id;
+  if(!id){
+    const c = await gdAppel("https://www.googleapis.com/drive/v3/files?fields=id", {
+      method:"POST", headers:{ "Content-Type":"application/json" },
+      body: JSON.stringify({ name:gdNomDossier(), mimeType:"application/vnd.google-apps.folder" })
+    });
+    id = (await c.json()).id;
+  }
+  DB.settings.gdDossier = id; sauver();
+  return id;
+}
+
+function contenuSauvegarde(){
+  return JSON.stringify({ ...DB, app:"antenne", appVersion:VERSION, schema:SCHEMA, exportedAt:new Date().toISOString() });
+}
+
+async function gdEnvoyer(interactif){
+  if(GD.enCours) return null;
+  GD.enCours = true;
+  try{
+    const contenu = contenuSauvegarde();
+    if(DB.settings.gdFichier){
+      try{
+        await gdAppel("https://www.googleapis.com/upload/drive/v3/files/" + DB.settings.gdFichier + "?uploadType=media",
+          { method:"PATCH", headers:{ "Content-Type":"application/json" }, body:contenu }, interactif);
+        DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); sauver();
+        return contenu.length;
+      }catch(e){
+        if(!/Drive 404/.test(e.message)) throw e;
+        DB.settings.gdFichier = "";   // effacé côté Drive : on en recrée un
+      }
+    }
+    const dossier = await gdDossier(interactif);
+    const lim = "antenne" + Date.now();
+    const corps = "--" + lim + "\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n" +
+      JSON.stringify({ name:GD_FICHIER, parents:[dossier] }) + "\r\n" +
+      "--" + lim + "\r\nContent-Type: application/json\r\n\r\n" + contenu + "\r\n--" + lim + "--";
+    const r = await gdAppel("https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id",
+      { method:"POST", headers:{ "Content-Type":"multipart/related; boundary=" + lim }, body:corps }, interactif);
+    DB.settings.gdFichier = (await r.json()).id;
+    DB.meta.cloud = Date.now(); DB.meta.exporte = Date.now(); sauver();
+    return contenu.length;
+  }finally{ GD.enCours = false; }
+}
+
+async function gdRecuperer(interactif){
+  if(!DB.settings.gdFichier){
+    const q = "name='" + GD_FICHIER + "' and trashed=false";
+    const r = await gdAppel("https://www.googleapis.com/drive/v3/files?fields=files(id,modifiedTime)&orderBy=modifiedTime desc&q=" +
+      encodeURIComponent(q), null, interactif);
+    const d = await r.json();
+    if(!d.files || !d.files.length) throw new Error("aucune sauvegarde trouvée sur ce compte");
+    DB.settings.gdFichier = d.files[0].id; sauver();
+  }
+  const r = await gdAppel("https://www.googleapis.com/drive/v3/files/" + DB.settings.gdFichier + "?alt=media", null, interactif);
+  return r.json();
+}
+
+function gdDeconnecter(){
+  try{ if(GD.jeton && window.google && google.accounts) google.accounts.oauth2.revoke(GD.jeton); }catch(e){}
+  GD.jeton = null; GD.expire = 0; GD.client = null;
+  DB.settings.gdFichier = ""; DB.settings.gdDossier = "";
+  DB.meta.cloud = 0; sauver();
+}
+
+/* Sauvegarde discrète : au lancement et quand on quitte l'onglet, jamais plus
+   d'une fois par vingt heures, et uniquement si le jeton s'obtient en silence. */
+async function gdAuto(raison){
+  if(!DB.settings.gdAuto || !gdConnecte()) return;
+  if(Date.now() - (DB.meta.cloud || 0) < 20 * 3600000) return;
+  try{
+    const n = await gdEnvoyer(false);
+    if(n && raison === "lancement" && state.tab === "reglages") render();
+  }catch(e){ /* silence : l'utilisateur relancera à la main si besoin */ }
 }
 
 /* ---------- CSV : lecture ---------- */
@@ -3866,25 +4171,8 @@ document.addEventListener("change", ev => {
           if(!confirm("Cette sauvegarde vient d'une version plus récente d'Antenne (schéma " + d.schema +
             ", cette page gère le " + SCHEMA + "). Des données peuvent être ignorées. Continuer ?")) return;
         }
-        let ns = 0, ne = 0;
-        Object.entries(d.shows).forEach(([k, v]) => { if(!DB.shows[k]){ DB.shows[k] = { pass:1, ...v }; ns++; } });
-        let nf = 0;
-        Object.entries(d.films || {}).forEach(([k, v]) => { if(!DB.films[k]){ DB.films[k] = v; nf++; } });
-        Object.entries(d.watched || {}).forEach(([k, v]) => {
-          const inc = Array.isArray(v) ? v : (v ? [v] : []);
-          const cur = Array.isArray(DB.watched[k]) ? DB.watched[k] : (DB.watched[k] ? [DB.watched[k]] : []);
-          const fus = [...new Set([...cur, ...inc])].sort();
-          if(fus.length > cur.length){ ne += fus.length - cur.length; DB.watched[k] = fus; }
-        });
-        if(d.settings){
-          ["tmdb","langue","pays"].forEach(k => {
-            if(d.settings[k] && !DB.settings[k]) DB.settings[k] = d.settings[k];
-          });
-        }
-        Object.keys(DB.watched).forEach(k => { if(!Array.isArray(DB.watched[k])) DB.watched[k] = [DB.watched[k]]; });
-        Object.values(DB.shows).forEach(sh => { if(!sh.pass) sh.pass = 1; });
-        toutSalir(); render();
-        toast(ns + " séries, " + nf + " films et " + ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
+        const b = fusionnerSauvegarde(d);
+        toast(b.ns + " séries, " + b.nf + " films et " + b.ne + " visionnages ajoutés" + (d.appVersion ? " (sauvegarde v" + d.appVersion + ")" : ""));
       }catch(e){ toast("Fichier illisible : " + e.message); }
     };
     rd.readAsText(f);
@@ -4001,6 +4289,7 @@ async function demarrer(){
   render();
   majQuota();
   setTimeout(majAuto, 2500);
+  setTimeout(() => gdAuto("lancement"), 4000);
 }
 
 // Les comptes à rebours vieillissent : on redessine une fois par minute,
@@ -4012,7 +4301,11 @@ setInterval(() => {
 }, 60000);
 
 // Écriture immédiate quand l'onglet passe en arrière-plan ou se ferme.
-document.addEventListener("visibilitychange", () => { if(document.visibilityState === "hidden") ecouler(); });
+document.addEventListener("visibilitychange", () => {
+  if(document.visibilityState !== "hidden") return;
+  ecouler();
+  gdAuto("sortie");
+});
 window.addEventListener("pagehide", ecouler);
 
 demarrer();
