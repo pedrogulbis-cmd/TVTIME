@@ -441,9 +441,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.31.0";
+const VERSION = "1.31.1";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.31.1", d:"2026-08-26", t:"Noter la série entière, ajouter au lieu de modifier", l:[
+    "Une note et une critique pour la série elle-même, en plus de celles des saisons. La pastille dorée s'affiche aussi dans l'entête de la fiche.",
+    "L'éditeur annonce désormais ce qu'il va faire : ajouter une nouvelle note à l'historique, ou modifier celle du tel jour.",
+    "Un bouton permet d'ajouter une note supplémentaire même sans nouveau passage, au lieu d'écraser la précédente.",
+    "Noter un film avant de l'avoir vu ne crée plus une entrée séparée de la première après visionnage."
+  ]},
   { v:"1.31.0", d:"2026-08-26", t:"Notes et critiques", l:[
     "Note en demi-étoiles et critique écrite, sur les saisons et sur les films.",
     "L'historique est conservé : une entrée par passage de revisionnage pour une saison, par visionnage pour un film. Tes notes précédentes restent lisibles sous la note courante.",
@@ -907,6 +913,8 @@ const DICO = {
   "Ta note et ce que tu en as pensé. Rien n’est partagé, tout reste chez toi.":"Your rating and what you thought of it. Nothing is shared, everything stays with you.",
   "Supprimer toutes les notes de cet élément":"Delete every rating for this item",
   "Notes précédentes":"Earlier ratings", "Note enregistrée":"Rating saved", "Notes supprimées":"Ratings deleted",
+  "Nouvelle note ajoutée à l’historique":"New rating added to the history",
+  "Ajouter une note plutôt que modifier":"Add a rating instead of editing",
   "Marquer uniquement cet épisode":"Mark only this episode",
   "Compter un visionnage de plus":"Count one more viewing",
   "Actualiser":"Refresh",
@@ -989,6 +997,7 @@ const REGLES = [
   [/^(\d+) épisodes cochés jusqu'à (.+)$/, (m, a, b) => a + " episodes ticked up to " + b],
   [/^Visionnage n°(\d+) compté$/,   (m, a) => "Viewing no. " + a + " counted"],
   [/^(\d+) notes? plus anciennes?$/, (m, a) => a + " earlier rating" + (+a > 1 ? "s" : "")],
+  [/^Modification de ta note du (.+)$/, (m, a) => "Editing your rating from " + a],
   [/^Moyenne de tes (\d+) saisons notées : (.+) sur 5$/, (m, a, b) => "Average of your " + a + " rated seasons: " + b + " out of 5"]
 ];
 
@@ -1602,6 +1611,7 @@ function autoStatut(sh){
    revisionnage pour une saison, par visionnage pour un film. La dernière fait
    foi, les précédentes restent lisibles pour voir son regard changer.
    ============================================================ */
+const cleSerie = id => "sh:" + id;
 const cleSaison = (shId, s) => "sa:" + shId + ":" + s;
 const cleFilm = id => "fi:" + id;
 
@@ -1612,13 +1622,13 @@ function noteDe(k){ const d = derniereNote(k); return d ? d.n : 0; }
 /* p identifie le moment : numéro de passage pour une saison, nombre de
    visionnages pour un film. Deux notes du même moment se remplacent ;
    un moment nouveau ajoute une entrée à l'historique. */
-function ecrireNote(k, n, t, p){
+function ecrireNote(k, n, t, p, forcerNeuve){
   n = Math.max(0, Math.min(5, Number(n) || 0));
   t = String(t || "").trim();
   if(!n && !t){ retirerNote(k); return; }
   const r = DB.notes[k] || { k, e:[] };
   const d = r.e.length ? r.e[r.e.length - 1] : null;
-  if(d && d.p === p){ d.n = n; d.t = t; d.q = new Date().toISOString(); }
+  if(d && d.p === p && !forcerNeuve){ d.n = n; d.t = t; d.q = new Date().toISOString(); }
   else r.e.push({ q:new Date().toISOString(), n, t, p });
   DB.notes[k] = r;
   sauverNote(r);
@@ -1679,10 +1689,17 @@ function blocNote(cle, titre, p){
 function vueNote(){
   const e = state.note;
   if(!e) return "";
-  const hist = entrees(e.k).slice(0, -1).reverse();
+  const d = derniereNote(e.k);
+  // Nouvelle entrée si le moment a changé, ou si on l'a demandé explicitement.
+  const neuve = !d || d.p !== e.p || e.neuf;
+  const hist = entrees(e.k).slice(neuve ? 0 : -1).reverse();
   return '<div class="voile" data-act="note-fermer"><div class="modal" data-act="rien">' +
     '<h2>' + esc(e.titre) + '</h2>' +
     '<p class="note">Ta note et ce que tu en as pensé. Rien n\'est partagé, tout reste chez toi.</p>' +
+    '<div class="mono" style="font-size:11px;margin-top:9px;color:' + (neuve ? "var(--vu)" : "var(--gris)") + '">' +
+      (neuve ? "Nouvelle note ajoutée à l\'historique"
+             : "Modification de ta note du " + frDate(String(d.q).slice(0, 10), true)) + '</div>' +
+    (neuve ? "" : '<button class="btn sm" style="margin-top:9px" data-act="note-neuve">Ajouter une note plutôt que modifier</button>') +
     '<div style="display:flex;align-items:center;gap:12px;margin-top:14px">' +
       etoiles(e.n, e.k) +
       '<span class="note-val" style="font-size:16px">' + (e.n ? fmtNote(e.n) : "—") + '</span>' +
@@ -2504,7 +2521,7 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
-      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, n) +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, Math.max(1, n)) +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
       blocCasting(f) +
       blocOTT(f) +
@@ -2994,7 +3011,8 @@ function vueFiche(sh){
     '<div class="hero"><div class="row">' + affiche(sh, "lg") +
       '<div class="info"><h2 style="font-size:20px;line-height:1.15">' + esc(sh.name) + '</h2>' +
       '<div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:5px">' + chipDiffusion(sh) +
-        (sh.premiered ? '<span class="code">' +
+        (noteDe(cleSerie(sh.id)) ? '<span class="code etoile">★ ' + fmtNote(noteDe(cleSerie(sh.id))) + '</span>' : "") +
+      (sh.premiered ? '<span class="code">' +
           (sh.premiered > todayISO() ? "Diffusion prévue le " : "Depuis le ") + esc(frDate(sh.premiered, true)) + '</span>' : "") +
         (sh.ended ? '<span class="code">Jusqu\'au ' + esc(frDate(sh.ended, true)) + '</span>' : "") +
         (sh.network ? '<span class="code">' + esc(sh.network) + '</span>' : "") +
@@ -3028,6 +3046,7 @@ function vueFiche(sh){
         : '<div class="box" style="margin-top:14px;text-align:center;font-size:13px;color:var(--gris)">Aucun épisode en attente</div>') +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleSerie(sh.id), sh.name, P) +
       '<div class="eyebrow">Statut</div>' +
       '<div class="seg">' + STATUTS.map(([id, l]) =>
         '<button class="' + (sh.userStatus === id ? "on" : "") + '" data-act="statut" data-id="' + sh.id + '" data-v="' + id + '">' + l + '</button>').join("") + '</div>' +
@@ -3439,6 +3458,11 @@ document.addEventListener("click", async ev => {
     const z = $("#note-txt"); if(z) state.note.t = z.value;
     render(); return;
   }
+  if(act === "note-neuve"){
+    if(!state.note) return;
+    const z = $("#note-txt"); if(z) state.note.t = z.value;
+    state.note.neuf = true; render(); return;
+  }
   if(act === "note-zero"){
     if(!state.note) return;
     const z = $("#note-txt"); if(z) state.note.t = z.value;
@@ -3448,7 +3472,7 @@ document.addEventListener("click", async ev => {
     if(!state.note) return;
     const z = $("#note-txt");
     const e = state.note;
-    ecrireNote(e.k, e.n, z ? z.value : e.t, e.p);
+    ecrireNote(e.k, e.n, z ? z.value : e.t, e.p, e.neuf);
     state.note = null; render();
     toast("Note enregistrée");
     return;
