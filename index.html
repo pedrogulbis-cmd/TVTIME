@@ -165,7 +165,10 @@ nav.tabs{
 .et button{position:absolute;top:0;height:100%;width:50%;opacity:0;cursor:pointer;padding:0;border:0}
 .et button.g{left:0} .et button.d{right:0}
 .note-val{font-family:"IBM Plex Mono",monospace;font-size:12.5px;font-weight:600;color:var(--or)}
-.note-bloc{background:var(--carte2);border:1px solid var(--trait);border-radius:10px;padding:10px 12px;margin:0 0 10px}
+.note-bloc{background:var(--carte2);border:1px solid var(--trait);border-radius:10px;padding:2px 12px;margin:0 0 10px}
+.note-ligne{padding:9px 0;border-top:1px solid var(--trait)}
+.note-ligne:first-child{border-top:0}
+.note-ligne:not(.act){opacity:.72}
 .note-ouvre{display:flex;align-items:center;gap:9px;width:100%;text-align:left}
 .note-vide{font-size:13px;color:var(--gris)}
 .note-crayon{margin-left:auto;font-size:11.5px;color:var(--signal);font-weight:600}
@@ -444,9 +447,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.31.2";
+const VERSION = "1.31.3";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.31.3", d:"2026-08-26", t:"Noter aussi les visionnages passés", l:[
+    "Le bandeau liste tous les visionnages, du plus récent au premier, et chacun porte son propre bouton.",
+    "Un film revu trois fois sans jamais avoir été noté propose donc trois emplacements distincts, au lieu du seul dernier.",
+    "Pour un film, la date du visionnage concerné est rappelée à côté du bouton, ce qui aide à se souvenir de quoi on parle.",
+    "Même principe pour les passages de revisionnage d'une série ou d'une saison."
+  ]},
   { v:"1.31.2", d:"2026-08-26", t:"Une note par visionnage, nommée", l:[
     "Chaque note porte le visionnage ou le passage auquel elle se rapporte : « 2ᵉ visionnage », « 3ᵉ passage ».",
     "Les notes précédentes ne sont plus repliées : elles s'empilent sous la note courante, chacune avec son rang et sa date.",
@@ -1687,33 +1696,33 @@ function etoiles(n, cle){
 }
 
 /* Bandeau de note, posé en tête d'une saison ou dans une fiche film. */
-function blocNote(cle, titre, p, type){
-  const toutes = entrees(cle).slice().reverse();
-  const courante = toutes.find(x => x.p === p) || null;
-  const anciennes = toutes.filter(x => x !== courante);
-  const multi = p > 1 || toutes.length > 0;
+/* Un visionnage par ligne, du plus récent au premier. Ceux qui n'ont pas
+   encore de note offrent leur propre bouton : on peut donc noter après coup
+   un visionnage ancien sans toucher aux autres. */
+function blocNote(cle, titre, p, type, dates){
+  const parP = new Map(entrees(cle).map(x => [x.p, x]));
+  const hauts = [...parP.keys()].filter(x => x > p);
+  const total = Math.max(p, ...(hauts.length ? hauts : [p]));
+  const multi = total > 1;
 
-  const ligne = (x, actuelle) =>
-    '<div class="note-anc' + (actuelle ? " act" : "") + '">' +
-      '<div class="note-anc-h">' + etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' +
-      (multi ? '<span class="note-rang">' + rang(x.p, type) + '</span>' : "") +
-      '<span class="note-date">' + frDate(String(x.q).slice(0, 10), true) + '</span></div>' +
-      (x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") + '</div>';
-
-  return '<div class="note-bloc">' +
-    '<button class="note-ouvre" data-act="note-edit" data-k="' + esc(cle) + '" data-titre="' + esc(titre) + '" ' +
-      'data-p="' + p + '" data-type="' + type + '">' +
-      (courante
-        ? etoiles(courante.n, "") + '<span class="note-val">' + fmtNote(courante.n) + '</span>' +
-          (multi ? '<span class="note-rang">' + rang(p, type) + '</span>' : "") +
-          '<span class="note-crayon">Modifier</span>'
-        : '<span class="note-vide">☆ ' + (multi ? "Noter ce " + rang(p, type) : "Noter") + '</span>' +
-          '<span class="note-crayon">Ajouter</span>') +
-    '</button>' +
-    (courante && courante.t ? '<p class="note-texte">' + esc(courante.t) + '</p>' : "") +
-    (anciennes.length
-      ? '<div class="note-avant">' + anciennes.map(x => ligne(x, false)).join("") + '</div>'
-      : "");
+  const lignes = [];
+  for(let i = total; i >= 1; i--){
+    const x = parP.get(i);
+    const quand = dates && dates[i - 1] ? frDate(String(dates[i - 1]).slice(0, 10), true) : "";
+    const etiq = multi ? '<span class="note-rang">' + rang(i, type) + '</span>' : "";
+    lignes.push('<div class="note-ligne' + (i === total ? " act" : "") + '">' +
+      '<button class="note-ouvre" data-act="note-edit" data-k="' + esc(cle) + '" data-titre="' + esc(titre) + '" ' +
+        'data-p="' + i + '" data-type="' + type + '">' +
+        (x ? etoiles(x.n, "") + '<span class="note-val">' + fmtNote(x.n) + '</span>' + etiq +
+             '<span class="note-crayon">Modifier</span>'
+           : '<span class="note-vide">☆ ' + (multi ? "Noter ce " + rang(i, type) : "Noter") + '</span>' +
+             (quand ? '<span class="note-date">' + quand + '</span>' : "") +
+             '<span class="note-crayon">Ajouter</span>') +
+      '</button>' +
+      (x && x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") +
+      '</div>');
+  }
+  return '<div class="note-bloc">' + lignes.join("") + '</div>';
 }
 
 /* Fenêtre d'édition : étoiles, texte, et rappel de l'historique. */
@@ -2552,7 +2561,7 @@ function vueFicheFilm(f){
       '</div>' +
     '</div>' +
     '<div class="wrap" style="padding-bottom:60px">' +
-      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, Math.max(1, n), "film") +
+      '<div class="eyebrow">Ta note</div>' + blocNote(cleFilm(f.id), f.titre, Math.max(1, n), "film", vuesFilm(f)) +
       (f.resume ? '<div class="eyebrow">Synopsis</div><p class="summary">' + esc(f.resume) + '</p>' : "") +
       blocCasting(f) +
       blocOTT(f) +
