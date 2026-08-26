@@ -169,6 +169,14 @@ nav.tabs{
 .note-ligne{padding:9px 0;border-top:1px solid var(--trait)}
 .note-ligne:first-child{border-top:0}
 .note-ligne:not(.act){opacity:.72}
+.note-pli>summary{list-style:none;display:flex;align-items:center;gap:8px;cursor:pointer}
+.note-pli>summary::-webkit-details-marker{display:none}
+.note-pli>summary>.note-ligne{flex:1;min-width:0}
+.note-plus{font-family:"IBM Plex Mono",monospace;font-size:10.5px;color:var(--gris);
+  border:1px solid var(--trait);border-radius:5px;padding:2px 7px;white-space:nowrap;flex:0 0 auto}
+.note-pli:not([open])>summary>.note-plus::after{content:" ▾"}
+.note-pli[open]>summary>.note-plus::after{content:" ▴"}
+.note-pli[open]>summary>.note-ligne{border-bottom:0}
 .note-ouvre{display:flex;align-items:center;gap:9px;width:100%;text-align:left}
 .note-vide{font-size:13px;color:var(--gris)}
 .note-crayon{margin-left:auto;font-size:11.5px;color:var(--signal);font-weight:600}
@@ -448,9 +456,15 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.32.1";
+const VERSION = "1.32.2";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.32.2", d:"2026-08-26", t:"Historique des notes repliable", l:[
+    "Le bandeau de notes se replie sur le visionnage courant dès qu'il y a plus d'une ligne, avec un compteur à droite indiquant combien d'autres attendent.",
+    "Le dépliage est retenu tant que la fiche reste ouverte, et rien n'est redessiné à l'ouverture — l'écueil qui avait figé l'application sur les rétrospectives.",
+    "Le bouton Modifier ne replie plus le bloc au passage.",
+    "Vaut pour les séries, les saisons et les films."
+  ]},
   { v:"1.32.1", d:"2026-08-26", t:"Volume d'une série dans l'aperçu", l:[
     "L'aperçu d'une série annonce le nombre de saisons, le nombre d'épisodes, et le temps qu'il faudrait pour tout voir.",
     "Quand des épisodes restent à venir, le nombre déjà diffusé est distingué du total.",
@@ -1740,7 +1754,14 @@ function blocNote(cle, titre, p, type, dates){
       (x && x.t ? '<p class="note-texte">' + esc(x.t) + '</p>' : "") +
       '</div>');
   }
-  return '<div class="note-bloc">' + lignes.join("") + '</div>';
+  if(lignes.length <= 1) return '<div class="note-bloc">' + lignes.join("") + '</div>';
+  // Au-delà d'une ligne, le bloc se replie sur le visionnage courant : le reste
+  // de l'historique se déplie à la demande.
+  const ouvert = state.notesOuvertes && state.notesOuvertes.has(cle);
+  return '<details class="note-bloc note-pli" data-note-k="' + esc(cle) + '"' + (ouvert ? " open" : "") + '>' +
+    '<summary>' + lignes[0] +
+      '<span class="note-plus">' + (lignes.length - 1) + '</span></summary>' +
+    lignes.slice(1).join("") + '</details>';
 }
 
 /* Fenêtre d'édition : étoiles, texte, et rappel de l'historique. */
@@ -1796,7 +1817,7 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
                 filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
-                fAnnee:"", fReste:"", doublons:null, tirage:null, note:null, apercu:null,
+                fAnnee:"", fReste:"", doublons:null, tirage:null, note:null, apercu:null, notesOuvertes:null,
                 panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
                 periodeA:"tout", filtreA:"all", vueA:"date", limiteA:60,
                 saisons:null, animer:false, retour:0, vise:null, journal:false, neuf:false, annuler:false,
@@ -3620,6 +3641,7 @@ document.addEventListener("click", async ev => {
   }
   if(act === "rien"){ ev.stopPropagation(); return; }
   if(act === "note-edit"){
+    ev.preventDefault();   // sinon le clic replierait aussi le bloc
     const k = el.dataset.k, d = derniereNote(k);
     const p = +el.dataset.p || 1;
     // Une note posée à un autre moment ouvre une nouvelle entrée : on part du
@@ -4212,6 +4234,12 @@ window.addEventListener("popstate", () => {
 });
 
 document.addEventListener("toggle", ev => {
+  if(ev.target.hasAttribute && ev.target.hasAttribute("data-note-k")){
+    const k = ev.target.getAttribute("data-note-k");
+    if(!state.notesOuvertes) state.notesOuvertes = new Set();
+    if(ev.target.open) state.notesOuvertes.add(k); else state.notesOuvertes.delete(k);
+    return;   // aucun rendu ici : il recréerait le bloc et relancerait l'événement
+  }
   if(ev.target.hasAttribute && ev.target.hasAttribute("data-an")){
     const an = ev.target.getAttribute("data-an");
     if(!state.ansOuvertes) state.ansOuvertes = new Set();
