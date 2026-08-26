@@ -419,9 +419,14 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.26.0";
+const VERSION = "1.27.0";
 const SCHEMA  = 3;
 const JOURNAL = [
+  { v:"1.27.0", d:"2026-08-26", t:"Filtres archivés réparés", l:[
+    "Les filtres « Archivées » et « Favoris » ressortaient vides : ils retombaient dans le filtre par statut, qui cherchait une série dont le statut vaudrait « archived ». Corrigé des deux côtés, séries et films.",
+    "Les fiches films se complètent toutes seules quand une mise à jour ajoute un champ, une seule fois : le numéro de révision est enregistré avant de commencer, ce qui rend toute relance en boucle impossible.",
+    "L'identifiant Google du site est renseigné : relier son Drive ne demande plus aucune configuration."
+  ]},
   { v:"1.26.0", d:"2026-08-26", t:"Distribution et dates de sortie", l:[
     "Les fiches affichent la distribution : photo, nom et rôle, avec la réalisation ou la création au-dessus.",
     "Chaque personne mène à sa filmographie complète — TVmaze pour les séries, TMDb pour les films, la même source que les données.",
@@ -698,7 +703,7 @@ const JOURNAL = [
    partager ton quota avec tous les visiteurs. Laisse-la vide si tu préfères
    que chacun renseigne la sienne dans les Réglages.
    ============================================================ */
-const GID_SITE  = "60704834299-4ob96jl0b04i02h3d2jo6dd6pfu14dqo.apps.googleusercontent.com";   // 1234567890-xxxx.apps.googleusercontent.com
+const GID_SITE  = "60704834299-4ob96jl0b04i02h3d2jo6dd6pfu14dqo.apps.googleusercontent.com";
 const TMDB_SITE = "";   // clé API TMDb — quota partagé, à tes risques
 
 const CFG = { gid:GID_SITE, tmdb:TMDB_SITE };
@@ -1423,14 +1428,20 @@ function vueListe(){
   /* --- filtrage --- */
   let l = tout;
   const f = state.filtre;
-  // Les archives n'apparaissent que dans « Toutes », reléguées en bas, et dans leur propre filtre.
-  if(f === "archived")      l = l.filter(sh => sh.archive);
-  else if(f !== "all")      l = l.filter(sh => !sh.archive);
-  if(f === "fav")           l = l.filter(sh => sh.favorite);
-  if(f === "rewatch")       l = l.filter(sh => passe(sh) > 1);
-  else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
-  else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
-  else if(f !== "all")      l = l.filter(sh => sh.userStatus === f);
+  // Les archives n'apparaissent que dans « Toutes », reléguées en bas, et dans
+  // leur propre filtre. Chaque cas est traité une seule fois : « archived » et
+  // « fav » ne sont pas des statuts et ne doivent pas retomber dans le filtre
+  // par statut, sinon la liste ressort vide.
+  if(f === "archived"){
+    l = l.filter(sh => sh.archive);
+  }else{
+    if(f !== "all") l = l.filter(sh => !sh.archive);
+    if(f === "fav")           l = l.filter(sh => sh.favorite);
+    else if(f === "rewatch")  l = l.filter(sh => passe(sh) > 1);
+    else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
+    else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
+    else if(f !== "all")      l = l.filter(sh => sh.userStatus === f);
+  }
 
   const q = norm(state.ql).trim();
   if(q) l = l.filter(sh => norm(sh.name).includes(q));
@@ -1759,17 +1770,34 @@ async function completerFilm(f){
   }catch(e){ return f; }
 }
 
+/* Numéro de révision de la fiche film. À incrémenter quand un champ nouveau
+   doit être récupéré chez TMDb — la mise à niveau se déclenche alors une fois,
+   toute seule, et jamais plus : le numéro est enregistré avant de commencer,
+   de sorte qu'un échec ne puisse pas la relancer en boucle. */
+const REV_FILMS = 1;
+function relanceNecessaire(){
+  return cleTMDB() && (DB.meta.revFilms || 0) < REV_FILMS &&
+    Object.values(DB.films).some(f => /^tmdb:/.test(f.id) && !f.date);
+}
+async function majFilmsAuto(){
+  if(!relanceNecessaire()) return;
+  DB.meta.revFilms = REV_FILMS; sauver();   // avant tout : aucune relance possible
+  await relangueFilms(true);
+}
+
 /* Réapplique la langue courante à toute la filmothèque. */
-async function relangueFilms(){
-  if(!cleTMDB()) return toast("Renseigne d'abord une clé TMDb");
+async function relangueFilms(silencieux){
+  if(!cleTMDB()){ if(!silencieux) toast("Renseigne d'abord une clé TMDb"); return; }
   const l = Object.values(DB.films).filter(f => /^tmdb:/.test(f.id));
-  if(!l.length) return toast("Aucun film à réactualiser");
-  impr.ouvrir("fl");
-  impr.dire(l.length + " films à repasser en " + langueNom() + ".");
+  if(!l.length){ if(!silencieux) toast("Aucun film à réactualiser"); return; }
+  if(!silencieux){
+    impr.ouvrir("fl");
+    impr.dire(l.length + " films à repasser en " + langueNom() + ".");
+  }
   let ok = 0;
   for(let i = 0; i < l.length; i++){
-    if(state.annuler){ impr.dire("\nInterrompu."); break; }
-    impr.avance(i + 1, l.length, (l.length - i) * 0.4);
+    if(state.annuler){ if(!silencieux) impr.dire("\nInterrompu."); break; }
+    if(!silencieux) impr.avance(i + 1, l.length, (l.length - i) * 0.4);
     const f = l[i];
     const avant = f.titre;
     try{
@@ -1779,13 +1807,16 @@ async function relangueFilms(){
         f.genres = maj.genres; f.duree = maj.duree; f.annee = maj.annee; f.date = maj.date || f.date;
         f.cast = undefined; f.chefs = undefined;   // rechargée dans la nouvelle langue
         sauverFilm(f); ok++;
-        impr.dire("✓ " + f.titre + (f.titre !== avant ? "   ← " + avant : ""));
-      }else impr.dire("✗ " + avant);
-    }catch(e){ impr.dire("✗ " + avant); }
-    await sleep(150);
+        if(!silencieux) impr.dire("✓ " + f.titre + (f.titre !== avant ? "   ← " + avant : ""));
+      }else if(!silencieux) impr.dire("✗ " + avant);
+    }catch(e){ if(!silencieux) impr.dire("✗ " + avant); }
+    await sleep(silencieux ? 400 : 150);
   }
-  impr.dire("\n" + ok + " films réactualisés en " + langueNom() + ".");
-  impr.fermer(); render(); toast(ok + " films réactualisés");
+  if(!silencieux){
+    impr.dire("\n" + ok + " films réactualisés en " + langueNom() + ".");
+    impr.fermer(); toast(ok + " films réactualisés");
+  }else if(ok) toast(ok + " fiches films complétées");
+  render();
 }
 
 const vuesFilm = f => Array.isArray(f.vu) ? f.vu : (f.vu ? [f.vu] : []);
@@ -1842,12 +1873,15 @@ function vueFilms(){
 
   let l = tout;
   const f = state.filtreF;
-  if(f === "archived")      l = l.filter(x => x.archive);
-  else if(f !== "all")      l = l.filter(x => !x.archive);
-  if(f === "fav")           l = l.filter(x => x.favorite);
-  else if(f === "planned")  l = l.filter(x => !nbVuesFilm(x));
-  else if(f === "watched")  l = l.filter(x => nbVuesFilm(x) > 0);
-  else if(f === "rewatch")  l = l.filter(x => nbVuesFilm(x) > 1);
+  if(f === "archived"){
+    l = l.filter(x => x.archive);
+  }else{
+    if(f !== "all") l = l.filter(x => !x.archive);
+    if(f === "fav")           l = l.filter(x => x.favorite);
+    else if(f === "planned")  l = l.filter(x => !nbVuesFilm(x));
+    else if(f === "watched")  l = l.filter(x => nbVuesFilm(x) > 0);
+    else if(f === "rewatch")  l = l.filter(x => nbVuesFilm(x) > 1);
+  }
 
   const q = norm(state.qlF).trim();
   if(q) l = l.filter(x => norm(x.titre).includes(q));
@@ -2755,7 +2789,9 @@ function vueReglages(){
       '<button class="' + ((DB.settings.langue || "fr") === id ? "on" : "") + '" data-act="langue" data-id="' + id + '">' + l + '</button>').join("") + '</div>' +
     '<p class="note" style="margin-top:9px">Titres, affiches et synopsis des films, tels que TMDb les publie dans cette langue. ' +
     'Quand un synopsis traduit n\'existe pas, celui d\'origine est repris plutôt qu\'un vide.</p>' +
-    '<p class="note" style="margin-top:7px">Le changement s\'applique aux prochaines recherches. Pour les films déjà dans ta liste :</p>' +
+    '<p class="note" style="margin-top:7px">Le changement s\'applique aux prochaines recherches. ' +
+    'Les fiches déjà en bibliothèque se complètent d\'elles-mêmes, une seule fois, quand une mise à jour d\'Antenne ajoute un champ. ' +
+    'Ce bouton force le passage pour toute la filmothèque :</p>' +
     '<button class="btn full" style="margin-top:9px" data-act="relangue">Repasser mes films en ' + langueNom() + '</button>' +
     '<div class="pgt hide" id="fl-bar"><i></i></div>' +
     '<div style="display:flex;align-items:center;gap:9px;margin-top:9px">' +
@@ -4424,6 +4460,7 @@ async function demarrer(){
   render();
   majQuota();
   setTimeout(majAuto, 2500);
+  setTimeout(majFilmsAuto, 9000);
 }
 
 // Les comptes à rebours vieillissent : on redessine une fois par minute,
