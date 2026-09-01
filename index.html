@@ -254,6 +254,12 @@ nav.tabs{
    traité à part plutôt qu'en alourdissant chaque tuile de la liste. */
 .bandeau{background:var(--carte);border:1px solid var(--signalB);border-radius:var(--r);
   padding:12px;margin-top:14px}
+.instal{display:flex;align-items:center;gap:12px;background:var(--signalF);
+  border:1px solid var(--signalB);border-radius:var(--r);padding:12px;margin-top:14px}
+.instal .ic{width:38px;height:38px;border-radius:10px;background:var(--encre);flex:0 0 38px;
+  display:grid;place-items:center}
+.instal .tx{flex:1;min-width:0;font-size:13px;line-height:1.45}
+.instal .tx b{display:block;font-family:Archivo;font-size:14px;margin-bottom:2px}
 .inedit{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid var(--trait)}
 .inedit:first-of-type{border-top:0;padding-top:2px}
 .inedit .t{font-family:Archivo,system-ui,sans-serif;font-weight:600;font-size:14px;line-height:1.2;
@@ -456,9 +462,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.32.2";
+const VERSION = "1.33.0";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.33.0", d:"2026-08-27", t:"Recherche universelle et installation", l:[
+    "Une seule barre de recherche cherche à la fois les séries, les films et les personnes, quel que soit l'onglet d'où on l'ouvre.",
+    "Taper le nom d'un acteur, d'un réalisateur ou d'un scénariste ouvre sa filmographie, d'où l'on ajoute directement.",
+    "Une série trouvée par ce chemin est convertie en identifiant TVmaze par son identifiant TVDB, pour rester cohérente avec la bibliothèque.",
+    "Antenne devient installable sur l'écran d'accueil : icônes et manifeste sont produits par l'application elle-même, sans fichier à déposer à côté.",
+    "Un bandeau propose l'installation en tête de Séries, et les Réglages gardent le bouton pour y revenir plus tard."
+  ]},
   { v:"1.32.2", d:"2026-08-26", t:"Historique des notes repliable", l:[
     "Le bandeau de notes se replie sur le visionnage courant dès qu'il y a plus d'une ligne, avec un compteur à droite indiquant combien d'autres attendent.",
     "Le dépliage est retenu tant que la fiche reste ouverte, et rien n'est redessiné à l'ouverture — l'écueil qui avait figé l'application sur les rétrospectives.",
@@ -957,6 +970,24 @@ const DICO = {
   "Ta note et ce que tu en as pensé. Rien n’est partagé, tout reste chez toi.":"Your rating and what you thought of it. Nothing is shared, everything stays with you.",
   "Supprimer toutes les notes de cet élément":"Delete every rating for this item",
   "Chargement de la fiche…":"Loading details…",
+  "Installer Antenne":"Install Antenne",
+  "Personnes":"People", "Recherche…":"Searching…",
+  "Série, film, acteur, réalisateur…":"Series, movie, actor, director…",
+  "← Retour aux résultats":"← Back to results",
+  "Voir sa filmographie":"See their filmography",
+  "Chargement de la filmographie…":"Loading filmography…",
+  "Interprétation":"Acting",
+  "Aucun titre trouvé pour cette personne.":"No title found for this person.",
+  "Rien trouvé sous ce nom.":"Nothing found under that name.",
+  "Cherche une série, un film, ou le nom d’un acteur, d’un réalisateur ou d’un scénariste.":"Search for a series, a movie, or the name of an actor, director or writer.",
+  "Série introuvable dans le catalogue des séries":"Series not found in the series catalogue", "Installer":"Install", "Plus tard":"Later",
+  "Compris":"Got it", "Application":"App", "Installer maintenant":"Install now",
+  "Installer sur l’écran d’accueil":"Install to your home screen",
+  "Reproposer le bandeau":"Show the banner again",
+  "Antenne tourne en application installée.":"Antenne is running as an installed app.",
+  "Pour l’ouvrir en plein écran depuis ton écran d’accueil, comme une vraie application.":"To open it full screen from your home screen, like a real app.",
+  "Depuis Safari : bouton Partager, puis « Sur l’écran d’accueil ».":"From Safari: Share button, then “Add to Home Screen”.",
+  "Antenne s’ouvre alors en plein écran, sans barre d’adresse, avec sa propre icône et sa place dans le sélecteur d’applications. Les données ne bougent pas : c’est la même application, au même endroit.":"Antenne then opens full screen, with no address bar, its own icon and its own slot in the app switcher. Your data does not move: it is the same app, in the same place.",
   "Déjà dans ta liste — fermer":"Already in your list — close",
   "Notes précédentes":"Earlier ratings", "Note enregistrée":"Rating saved", "Notes supprimées":"Ratings deleted",
   "Nouvelle note ajoutée à l’historique":"New rating added to the history",
@@ -1386,7 +1417,102 @@ function fusionnerSauvegarde(d){
   return { ns, nf, ne };
 }
 
-/* ---------- fraîcheur de la sauvegarde ---------- */
+/* ============================================================
+   INSTALLATION SUR L'ÉCRAN D'ACCUEIL
+   Icônes dessinées au canevas et manifeste construit ici même : rien à
+   déposer à côté du fichier, l'application reste d'un seul tenant. Le
+   navigateur peut alors proposer l'installation, et on relaie la proposition
+   par un bandeau plutôt que d'attendre qu'il la range dans un menu.
+   ============================================================ */
+function dessinerIcone(taille, marge){
+  const c = document.createElement("canvas");
+  c.width = c.height = taille;
+  const x = c.getContext("2d");
+  const fond = LANG && themeActuel() === "clair" ? "#17131f" : "#17131f";
+  const u = taille / 64, p = marge ? taille * 0.14 : 0, t = taille - p * 2, k = t / 64;
+  if(marge){ x.fillStyle = fond; x.fillRect(0, 0, taille, taille); }
+  else{
+    const r = taille * 0.22;
+    x.beginPath();
+    x.moveTo(r, 0); x.arcTo(taille, 0, taille, taille, r); x.arcTo(taille, taille, 0, taille, r);
+    x.arcTo(0, taille, 0, 0, r); x.arcTo(0, 0, taille, 0, r); x.closePath();
+    x.fillStyle = fond; x.fill();
+  }
+  // le mât et les deux branches de l'antenne
+  x.strokeStyle = "#ff7a45"; x.lineCap = "round"; x.lineWidth = 6 * k;
+  x.beginPath();
+  x.moveTo(p + 32*k, p + 42*k); x.lineTo(p + 32*k, p + 24*k);
+  x.moveTo(p + 32*k, p + 24*k); x.lineTo(p + 18*k, p + 14*k);
+  x.moveTo(p + 32*k, p + 24*k); x.lineTo(p + 46*k, p + 14*k);
+  x.stroke();
+  // le socle
+  x.fillStyle = "#7ee0b8";
+  const bx = p + 18*k, by = p + 42*k, bw = 28*k, bh = 10*k, br = 4*k;
+  x.beginPath();
+  x.moveTo(bx + br, by); x.arcTo(bx + bw, by, bx + bw, by + bh, br);
+  x.arcTo(bx + bw, by + bh, bx, by + bh, br); x.arcTo(bx, by + bh, bx, by, br);
+  x.arcTo(bx, by, bx + bw, by, br); x.closePath(); x.fill();
+  return c.toDataURL("image/png");
+}
+
+let _manifeste = null;
+function majManifeste(){
+  try{
+    const clair = document.documentElement.getAttribute("data-theme") === "clair";
+    const p192 = dessinerIcone(192, false), p512 = dessinerIcone(512, false), pm = dessinerIcone(512, true);
+    let at = document.querySelector('link[rel="apple-touch-icon"]');
+    if(!at){ at = document.createElement("link"); at.rel = "apple-touch-icon"; document.head.appendChild(at); }
+    at.href = p192;
+    const man = {
+      name:"Antenne", short_name:"Antenne", start_url:".", scope:".",
+      display:"standalone", orientation:"portrait", lang:LANG(),
+      background_color: clair ? "#f4f1f7" : "#17131f",
+      theme_color: clair ? "#f4f1f7" : "#17131f",
+      icons:[ { src:p192, sizes:"192x192", type:"image/png" },
+              { src:p512, sizes:"512x512", type:"image/png" },
+              { src:pm,   sizes:"512x512", type:"image/png", purpose:"maskable" } ]
+    };
+    if(_manifeste) URL.revokeObjectURL(_manifeste);
+    _manifeste = URL.createObjectURL(new Blob([JSON.stringify(man)], { type:"application/manifest+json" }));
+    let lm = document.querySelector('link[rel="manifest"]');
+    if(!lm){ lm = document.createElement("link"); lm.rel = "manifest"; document.head.appendChild(lm); }
+    lm.href = _manifeste;
+  }catch(e){ /* une icône ratée ne doit pas empêcher l'application de tourner */ }
+}
+
+/* L'invite du navigateur est capturée pour être proposée au bon moment,
+   plutôt que rangée dans un menu que personne n'ouvre. */
+let inviteInstall = null;
+const dejaInstallee = () =>
+  window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+const surIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+
+window.addEventListener("beforeinstallprompt", ev => {
+  ev.preventDefault();
+  inviteInstall = ev;
+  if(pret && !DB.meta.installRefus) render();
+});
+window.addEventListener("appinstalled", () => {
+  inviteInstall = null;
+  DB.meta.installe = Date.now(); sauver(true);
+  toast("Antenne est installée");
+  render();
+});
+
+function installProposable(){
+  if(dejaInstallee() || (DB.meta && DB.meta.installRefus)) return false;
+  return !!inviteInstall || surIOS();
+}
+async function lancerInstall(){
+  if(inviteInstall){
+    inviteInstall.prompt();
+    try{ await inviteInstall.userChoice; }catch(e){}
+    inviteInstall = null;
+    render();
+  }
+}
+
+/* ---------- fraîcheur de la sauvegarde ---------- *//* ---------- fraîcheur de la sauvegarde ---------- */
 function joursDepuisExport(){
   if(!DB.meta || !DB.meta.exporte) return null;
   return Math.floor((Date.now() - DB.meta.exporte) / 86400000);
@@ -1816,7 +1942,8 @@ const svg = (k, sz) => '<svg width="' + (sz||21) + '" height="' + (sz||21) + '" 
 
 /* ---------- état de navigation ---------- */
 const state = { tab:"library", detailF:null, detail:null, filtre:"all", tri:"recent", q:"", res:[], cherche:false,
-                filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], cibleRecherche:"series", epOuvert:null,
+                filtreF:"all", triF:"activite", qlF:"", limiteF:60, resF:[], resP:[], pers:null,
+                cherchant:false, epOuvert:null,
                 fAnnee:"", fReste:"", doublons:null, tirage:null, note:null, apercu:null, notesOuvertes:null,
                 panneauF:false, fGenreF:"", fAnneeF:"", fDureeF:"", ansOuvertes:null,
                 periodeA:"tout", filtreA:"all", vueA:"date", limiteA:60,
@@ -1988,6 +2115,23 @@ const FILTRES = [
   { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
   { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }, { id:"archived", l:"Archivées" }
 ];
+/* Bandeau d'installation, proposé une fois en tête de Séries. */
+function blocInstall(){
+  if(!installProposable()) return "";
+  const ios = surIOS() && !inviteInstall;
+  return '<div class="instal">' +
+    '<div class="ic"><svg width="20" height="20" viewBox="0 0 32 32" fill="none">' +
+      '<path d="M16 21V12M16 12 9 7M16 12l7-5" stroke="#ff7a45" stroke-width="2.6" stroke-linecap="round"/>' +
+      '<rect x="9" y="21" width="14" height="5" rx="2" fill="#7ee0b8"/></svg></div>' +
+    '<div class="tx"><b>Installer Antenne</b>' +
+      (ios ? "Depuis Safari : bouton Partager, puis « Sur l\'écran d\'accueil »."
+           : "Pour l\'ouvrir en plein écran depuis ton écran d\'accueil, comme une vraie application.") + '</div>' +
+    (ios ? '<button class="btn sm" data-act="install-non">Compris</button>'
+         : '<button class="btn sm pri" data-act="install-oui">Installer</button>' +
+           '<button class="btn sm" data-act="install-non">Plus tard</button>') +
+    '</div>';
+}
+
 function vueListe(){
   const tout = Object.values(DB.shows);
   if(!tout.length)
@@ -2133,7 +2277,7 @@ function vueListe(){
   const titre = q ? 'Titres contenant « ' + esc(state.ql.trim()) + ' »'
                   : (FILTRES.find(x => x.id === f) || {}).l;
 
-  return bandeau + barre + panneau + chips + tris +
+  return blocInstall() + bandeau + barre + panneau + chips + tris +
     '<div class="eyebrow">' + titre + ' <b>' + l.length + '</b>' +
       (resteTotal ? '<span style="color:var(--signal);letter-spacing:.04em">reste ' + dureeLongue(resteTotal) + '</span>' : "") +
     '</div>' + corps;
@@ -2977,62 +3121,107 @@ function vueStats(){
 }
 
 /* ---------- vue : Recherche ---------- */
-function vueRecherche(){
-  if(state.cibleRecherche === "films") return vueRechercheFilms();
-  const res = state.res.map(sh => {
-    const dedans = !!DB.shows[sh.id];
-    return '<div class="card serie">' +
-      '<button class="row" style="flex:1;min-width:0" data-act="preview" data-id="' + sh.id + '">' + affiche(sh) +
-      '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
-      '<div class="sub">' + [sh.premiered ? sh.premiered.slice(0, 4) : "", sh.network, (sh.genres || []).slice(0, 2).join(", ")]
-        .filter(Boolean).map(esc).join(" · ") + '</div></div></button>' +
-      '<div class="ops">' +
-        (dedans
-          ? '<span class="opnext fait">Ajoutée</span>' +
-            '<div class="opsrow"><button class="op sup" data-act="supprimer" data-id="' + sh.id + '" ' +
-            'title="Retirer de ma liste" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
-          : '<button class="opnext" data-act="add" data-id="' + sh.id + '" title="Ajouter à voir">À voir</button>' +
-            '<button class="opnext dv" data-act="add-vu" data-id="' + sh.id + '" title="Ajouter en marquant tous les épisodes diffusés comme vus">Déjà vue</button>') +
-      '</div></div>';
-  }).join("");
-
-  return '<div style="padding-top:14px"></div>' +
-    '<div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
-    '<input id="q" type="search" placeholder="Titre de série…" autocomplete="off" value="' + esc(state.q) + '">' +
-    '<button class="btn sm" data-act="close-search">Fermer</button></div>' +
-    (state.res.length ? '<div class="eyebrow">Résultats <b>' + state.res.length + '</b></div><div class="stack">' + res + '</div>'
-      : state.q.length > 1 ? '<div class="empty"><p>Aucune série trouvée. Essaie le titre original en anglais.</p></div>'
-      : '<div class="empty"><p>Tape un titre pour chercher dans le catalogue TVmaze.</p></div>');
+/* ============================================================
+   RECHERCHE UNIVERSELLE
+   Une seule barre, quel que soit l'onglet : séries chez TVmaze, films et
+   personnes chez TMDb. Une personne ouvre sa filmographie, d'où l'on peut
+   ajouter directement. Les séries y sont converties en identifiants TVmaze
+   par leur identifiant TVDB, pour rester cohérentes avec la bibliothèque.
+   ============================================================ */
+function carteSerieRes(sh){
+  const dedans = !!DB.shows[sh.id];
+  return '<div class="card serie">' +
+    '<button class="row" style="flex:1;min-width:0" data-act="preview" data-id="' + sh.id + '">' + affiche(sh) +
+    '<div class="info"><div class="title">' + esc(sh.name) + '</div>' +
+    '<div class="sub">' + [sh.premiered ? sh.premiered.slice(0, 4) : "", sh.network, (sh.genres || []).slice(0, 2).join(", ")]
+      .filter(Boolean).map(esc).join(" · ") + '</div></div></button>' +
+    '<div class="ops">' +
+      (dedans
+        ? '<span class="opnext fait">Ajoutée</span>' +
+          '<div class="opsrow"><button class="op sup" data-act="supprimer" data-id="' + sh.id + '" ' +
+          'title="Retirer de ma liste" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
+        : '<button class="opnext" data-act="add" data-id="' + sh.id + '" title="Ajouter à voir">À voir</button>' +
+          '<button class="opnext dv" data-act="add-vu" data-id="' + sh.id + '" title="Ajouter en marquant tous les épisodes diffusés comme vus">Déjà vue</button>') +
+    '</div></div>';
+}
+function carteFilmRes(f){
+  const dedans = !!DB.films[f.id];
+  return '<div class="card serie">' +
+    '<button class="row" style="flex:1;min-width:0" data-act="preview-f" data-id="' + esc(f.id) + '">' + afficheFilm(f) +
+    '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
+    '<div class="sub">' + esc([f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
+    (f.resume ? '<div class="sub" style="-webkit-line-clamp:2;margin-top:4px">' + esc(f.resume) + '</div>' : "") +
+    '</div></button>' +
+    '<div class="ops">' +
+      (dedans
+        ? '<span class="opnext fait">Ajouté</span>' +
+          '<div class="opsrow"><button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" ' +
+          'title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
+        : '<button class="opnext" data-act="add-f" data-id="' + esc(f.id) + '" title="Ajouter à voir">À voir</button>' +
+          '<button class="opnext dv" data-act="add-f-vu" data-id="' + esc(f.id) + '" title="Ajouter en le marquant déjà vu">Déjà vu</button>') +
+    '</div></div>';
+}
+function cartePersonne(p2){
+  return '<button class="card row" data-act="personne" data-id="' + esc(p2.id) + '" data-nom="' + esc(p2.n) + '">' +
+    (p2.p ? '<div class="poster" style="background-image:url(' + esc(p2.p) + ')"></div>'
+          : '<div class="poster"><div class="ph">' + esc((p2.n || "?")[0].toUpperCase()) + '</div></div>') +
+    '<div class="info"><div class="title">' + esc(p2.n) + '</div>' +
+    '<div class="sub">' + esc(p2.r || "") + '</div>' +
+    '<div class="mono" style="font-size:10.5px;color:var(--signal);margin-top:5px">Voir sa filmographie</div>' +
+    '</div></button>';
 }
 
-function vueRechercheFilms(){
-  const res = state.resF.map(f => {
-    const dedans = !!DB.films[f.id];
-    return '<div class="card serie">' +
-      '<button class="row" style="flex:1;min-width:0" data-act="preview-f" data-id="' + esc(f.id) + '">' + afficheFilm(f) +
-      '<div class="info"><div class="title">' + esc(f.titre) + '</div>' +
-      '<div class="sub">' + esc([f.annee, (f.genres || [])[0], f.duree ? f.duree + " min" : ""].filter(Boolean).join(" · ")) + '</div>' +
-      (f.resume ? '<div class="sub" style="-webkit-line-clamp:2;margin-top:4px">' + esc(f.resume) + '</div>' : "") +
-      '</div></button>' +
-      '<div class="ops">' +
-        (dedans
-          ? '<span class="opnext fait">Ajouté</span>' +
-            '<div class="opsrow"><button class="op sup" data-act="supprimer-f" data-id="' + esc(f.id) + '" ' +
-            'title="Retirer de mes films" aria-label="Retirer">' + svg("poubelle", 16) + '</button></div>'
-          : '<button class="opnext" data-act="add-f" data-id="' + esc(f.id) + '" title="Ajouter à voir">À voir</button>' +
-            '<button class="opnext dv" data-act="add-f-vu" data-id="' + esc(f.id) + '" title="Ajouter en le marquant déjà vu">Déjà vu</button>') +
-      '</div></div>';
-  }).join("");
-
+function barreRecherche(){
   return '<div style="padding-top:14px"></div>' +
     '<div class="search"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--gris)" stroke-width="2.1" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>' +
-    '<input id="q" type="search" placeholder="Titre du film…" autocomplete="off" value="' + esc(state.q) + '">' +
-    '<button class="btn sm" data-act="close-search">Fermer</button></div>' +
-    (!cleTMDB() ? '<div class="empty"><h3>Clé TMDb requise</h3><p>Colle une clé gratuite dans les Réglages pour chercher des films.</p>' +
-        '<button class="btn pri" data-act="tab" data-id="reglages">Aller aux Réglages</button></div>'
-      : state.resF.length ? '<div class="eyebrow">Résultats <b>' + state.resF.length + '</b></div><div class="stack">' + res + '</div>'
-      : state.q.length > 1 ? '<div class="empty"><p>Aucun film trouvé sous ce titre.</p></div>'
-      : '<div class="empty"><p>Tape un titre pour chercher un film.</p></div>');
+    '<input id="q" type="search" placeholder="Série, film, acteur, réalisateur…" autocomplete="off" value="' + esc(state.q) + '">' +
+    '<button class="btn sm" data-act="close-search">Fermer</button></div>';
+}
+
+function vueRecherche(){
+  if(state.pers) return vuePersonne();
+  const s2 = state.res.map(carteSerieRes).join("");
+  const f2 = state.resF.map(carteFilmRes).join("");
+  const p2 = state.resP.map(cartePersonne).join("");
+  const rien = !state.res.length && !state.resF.length && !state.resP.length;
+
+  const bloc = (titre, n, corps) => n
+    ? '<div class="eyebrow">' + titre + ' <b>' + n + '</b></div><div class="stack">' + corps + '</div>' : "";
+
+  return barreRecherche() +
+    (state.cherchant ? '<div class="empty" style="padding:22px"><p>Recherche…</p></div>' : "") +
+    bloc("Séries", state.res.length, s2) +
+    bloc("Films", state.resF.length, f2) +
+    bloc("Personnes", state.resP.length, p2) +
+    (!state.cherchant && rien
+      ? (state.q.length > 1
+          ? '<div class="empty"><p>Rien trouvé sous ce nom.' +
+            (cleTMDB() ? "" : " Sans clé TMDb, seules les séries sont cherchées — les films et les personnes demandent une clé.") + '</p></div>'
+          : '<div class="empty"><p>Cherche une série, un film, ou le nom d\'un acteur, d\'un réalisateur ou d\'un scénariste.</p></div>')
+      : "");
+}
+
+/* ---------- filmographie d'une personne ---------- */
+function vuePersonne(){
+  const p2 = state.pers;
+  const films = (p2.credits || []).filter(x => x.type === "film");
+  const series = (p2.credits || []).filter(x => x.type === "serie");
+  const ligne = x =>
+    '<button class="card row" data-act="' + (x.type === "film" ? "cred-film" : "cred-serie") + '" ' +
+      'data-id="' + esc(x.id) + '" data-tvdb="' + esc(x.tvdb || "") + '" data-nom="' + esc(x.titre) + '">' +
+      (x.aff ? '<div class="poster" style="background-image:url(' + esc(x.aff) + ')"></div>'
+             : '<div class="poster"><div class="ph">' + esc((x.titre || "?")[0].toUpperCase()) + '</div></div>') +
+      '<div class="info"><div class="title">' + esc(x.titre) + '</div>' +
+      '<div class="sub">' + esc([x.annee, x.role].filter(Boolean).join(" · ")) + '</div></div></button>';
+
+  return barreRecherche() +
+    '<button class="btn sm" style="margin-top:12px" data-act="pers-retour">← Retour aux résultats</button>' +
+    '<div class="eyebrow">' + esc(p2.nom) + '</div>' +
+    (p2.chargement ? '<div class="empty" style="padding:22px"><p>Chargement de la filmographie…</p></div>' : "") +
+    (series.length ? '<div class="eyebrow">Séries <b>' + series.length + '</b></div><div class="stack">' + series.map(ligne).join("") + '</div>' : "") +
+    (films.length ? '<div class="eyebrow">Films <b>' + films.length + '</b></div><div class="stack">' + films.map(ligne).join("") + '</div>' : "") +
+    (!p2.chargement && !series.length && !films.length
+      ? '<div class="empty"><p>Aucun titre trouvé pour cette personne.</p></div>' : "");
 }
 
 /* ============================================================
@@ -3552,6 +3741,20 @@ function vueReglages(){
       '<div class="log hide" id="ent-log"></div></div>';
   })() +
 
+  (dejaInstallee()
+    ? '<div class="eyebrow">Application</div><div class="box"><p class="note" style="color:var(--vu)">' +
+      'Antenne tourne en application installée.</p></div>'
+    : '<div class="eyebrow">Application</div><div class="box"><h3>Installer sur l\'écran d\'accueil</h3>' +
+      '<p class="note">Antenne s\'ouvre alors en plein écran, sans barre d\'adresse, avec sa propre icône et sa place dans le sélecteur d\'applications. ' +
+      'Les données ne bougent pas : c\'est la même application, au même endroit.</p>' +
+      (surIOS() && !inviteInstall
+        ? '<p class="note" style="margin-top:9px">Sur iPhone, l\'installation passe par Safari : bouton Partager, puis « Sur l\'écran d\'accueil ».</p>'
+        : inviteInstall
+          ? '<button class="btn full pri" style="margin-top:11px" data-act="install-oui">Installer maintenant</button>'
+          : '<p class="note" style="margin-top:9px">Ton navigateur n\'a pas encore proposé l\'installation. Elle apparaît en général après quelques visites, ou depuis son menu.</p>') +
+      ((DB.meta && DB.meta.installRefus) ? '<button class="btn full" style="margin-top:9px" data-act="install-rappel">Reproposer le bandeau</button>' : "") +
+      '</div>') +
+
   '<div class="eyebrow">Données</div>' +
   '<div class="box"><div class="grid2" style="gap:9px">' +
       '<div class="stat" style="padding:10px"><div class="n" style="font-size:20px">' + n + ' / ' + nf + '</div><div class="l">séries / films</div></div>' +
@@ -3640,6 +3843,9 @@ document.addEventListener("click", async ev => {
     return;
   }
   if(act === "rien"){ ev.stopPropagation(); return; }
+  if(act === "install-oui"){ await lancerInstall(); return; }
+  if(act === "install-non"){ DB.meta.installRefus = Date.now(); sauver(true); render(); return; }
+  if(act === "install-rappel"){ DB.meta.installRefus = 0; sauver(true); render(); toast("Le bandeau réapparaîtra sur Séries"); return; }
   if(act === "note-edit"){
     ev.preventDefault();   // sinon le clic replierait aussi le bloc
     const k = el.dataset.k, d = derniereNote(k);
@@ -3721,11 +3927,31 @@ document.addEventListener("click", async ev => {
     return;
   }
   if(act === "go-search"){
-    state.cherche = true;
-    state.cibleRecherche = state.tab === "films" ? "films" : "series";
+    state.cherche = true; state.pers = null;
     render(); setTimeout(() => { const q = $("#q"); if(q) q.focus(); }, 60); return;
   }
-  if(act === "close-search"){ state.cherche = false; state.q = ""; state.res = []; state.resF = []; render(); return; }
+  if(act === "personne"){
+    state.pers = { id, nom:el.dataset.nom, credits:[], chargement:true };
+    render(); chargerPersonne(); return;
+  }
+  if(act === "pers-retour"){ state.pers = null; render(); return; }
+  if(act === "cred-film"){
+    state.apercu = { type:"film", id:"tmdb:" + id, d:null, err:null };
+    render(); chargerApercu(); return;
+  }
+  if(act === "cred-serie"){
+    el.style.opacity = ".5";
+    const vid = await serieTVmaze(id, el.dataset.nom);
+    el.style.opacity = "";
+    if(!vid) return toast("Série introuvable dans le catalogue des séries");
+    if(DB.shows[vid]) return ouvrirFiche(vid);
+    state.apercu = { type:"serie", id:vid, d:null, err:null };
+    render(); chargerApercu(); return;
+  }
+  if(act === "close-search"){
+    state.cherche = false; state.q = ""; state.res = []; state.resF = []; state.resP = []; state.pers = null;
+    render(); return;
+  }
   if(act === "filtre"){
     state.filtre = id; state.limite = PAGE;
     DB.settings.filtre = id; sauver();   // le choix est retenu d'une session à l'autre
@@ -4068,7 +4294,7 @@ document.addEventListener("click", async ev => {
   if(act === "theme"){
     DB.settings.theme = id;
     try{ localStorage.setItem(LSTHEME, id); }catch(e){}
-    appliquerTheme(id); sauver(); render();
+    appliquerTheme(id); sauver(); render(); majManifeste();
     return;
   }
   if(act === "tg"){
@@ -4342,6 +4568,92 @@ document.addEventListener("input", ev => {
   }, 180);
 });
 
+/* Une frappe interroge les deux catalogues à la fois. TVmaze couvre les
+   séries, TMDb les films et les personnes ; sans clé TMDb, seules les séries
+   remontent, ce que la vue annonce. */
+async function chercherTout(q){
+  state.cherchant = true; majResultats();
+  const cle = cleTMDB();
+  const taches = [
+    net.get(API + "/search/shows?q=" + encodeURIComponent(q))
+      .then(r => { state.res = (r || []).map(x => normShow(x.show)).slice(0, 12); })
+      .catch(() => { state.res = []; })
+  ];
+  if(cle){
+    taches.push(
+      jsonLibre("https://api.themoviedb.org/3/search/multi?api_key=" + encodeURIComponent(cle) +
+        "&language=" + LANGUE() + "&include_adult=false&query=" + encodeURIComponent(q))
+        .then(d => {
+          const l = d.results || [];
+          state.resF = l.filter(x => x.media_type === "movie").slice(0, 12).map(normFilmTMDB);
+          state.resP = l.filter(x => x.media_type === "person").slice(0, 8).map(x => ({
+            id:String(x.id), n:x.name || "",
+            p:x.profile_path ? "https://image.tmdb.org/t/p/w185" + x.profile_path : null,
+            r:x.known_for_department === "Directing" ? "Réalisation"
+              : x.known_for_department === "Writing" ? "Scénario"
+              : x.known_for_department === "Acting" ? "Interprétation" : (x.known_for_department || "")
+          }));
+        })
+        .catch(() => { state.resF = []; state.resP = []; })
+    );
+  }else{ state.resF = []; state.resP = []; }
+  await Promise.all(taches);
+  state.cherchant = false;
+  majResultats();
+}
+
+/* Filmographie : TMDb réunit cinéma et télévision en un appel. */
+async function chargerPersonne(){
+  const p2 = state.pers;
+  if(!p2 || !p2.credits) return;
+  const cle = cleTMDB();
+  if(!cle){ p2.credits = []; p2.chargement = false; return render(); }
+  try{
+    const d = await jsonLibre("https://api.themoviedb.org/3/person/" + p2.id +
+      "/combined_credits?api_key=" + encodeURIComponent(cle) + "&language=" + LANGUE());
+    const brut = [...(d.cast || []).map(x => ({ ...x, role:x.character })),
+                  ...(d.crew || []).filter(x => /^(Director|Screenplay|Writer|Creator)$/.test(x.job))
+                      .map(x => ({ ...x, role:x.job === "Director" ? "Réalisation" : "Scénario" }))];
+    const vus = new Set();
+    p2.credits = brut.map(x => {
+      const film = x.media_type === "movie";
+      const d2 = film ? x.release_date : x.first_air_date;
+      return { type:film ? "film" : "serie", id:String(x.id), titre:(film ? x.title : x.name) || "",
+        annee:d2 ? String(d2).slice(0, 4) : "", role:x.role || "",
+        aff:x.poster_path ? "https://image.tmdb.org/t/p/w185" + x.poster_path : null,
+        pop:x.popularity || 0 };
+    }).filter(x => {
+      const k = x.type + ":" + x.id;
+      if(!x.titre || vus.has(k)) return false;
+      vus.add(k); return true;
+    }).sort((a, b) => String(b.annee).localeCompare(String(a.annee)) || b.pop - a.pop);
+  }catch(e){ p2.credits = []; }
+  p2.chargement = false;
+  if(state.pers === p2) render();
+}
+
+/* Une série vue chez TMDb doit devenir un identifiant TVmaze pour rejoindre
+   la bibliothèque : on passe par l'identifiant TVDB, exact, puis par le titre. */
+async function serieTVmaze(idTMDB, titre){
+  const cle = cleTMDB();
+  if(cle){
+    try{
+      const e = await jsonLibre("https://api.themoviedb.org/3/tv/" + idTMDB +
+        "/external_ids?api_key=" + encodeURIComponent(cle));
+      if(e && e.tvdb_id){
+        const lk = await net.get(API + "/lookup/shows?thetvdb=" + e.tvdb_id);
+        if(lk) return lk.id;
+      }
+      if(e && e.imdb_id){
+        const lk = await net.get(API + "/lookup/shows?imdb=" + e.imdb_id);
+        if(lk) return lk.id;
+      }
+    }catch(x){}
+  }
+  const r = await net.get(API + "/singlesearch/shows?q=" + encodeURIComponent(titre));
+  return r ? r.id : null;
+}
+
 let _q;
 document.addEventListener("input", ev => {
   if(ev.target.id !== "q") return;
@@ -4349,18 +4661,9 @@ document.addEventListener("input", ev => {
   clearTimeout(_q);
   _q = setTimeout(async () => {
     const q = state.q.trim();
-    if(q.length < 2){ state.res = []; state.resF = []; return majResultats(); }
-    if(state.cibleRecherche === "films"){
-      if(!cleTMDB()){ state.resF = []; return majResultats(); }
-      try{ state.resF = await chercherFilms(q); }
-      catch(e){ toast("Recherche indisponible — vérifie ta clé TMDb"); state.resF = []; }
-      return majResultats();
-    }
-    try{
-      const r = await net.get(API + "/search/shows?q=" + encodeURIComponent(q));
-      state.res = (r || []).map(x => normShow(x.show)).slice(0, 20);
-    }catch(e){ toast("Recherche indisponible — vérifie ta connexion"); state.res = []; }
-    majResultats();
+    if(q.length < 2){ state.res = []; state.resF = []; state.resP = []; state.cherchant = false; return majResultats(); }
+    state.pers = null;
+    await chercherTout(q);
   }, 340);
 });
 function majResultats(){
@@ -5295,6 +5598,7 @@ async function demarrer(){
   }
 
   render();
+  majManifeste();
   majQuota().then(() => {
     const part = partQuota();
     if(part !== null && part >= 0.95) toast("Stockage à " + Math.round(part * 100) + " % — voir les Réglages");
