@@ -462,9 +462,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.34.1";
+const VERSION = "1.34.2";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.34.2", d:"2026-10-17", t:"Vue TV Time affinée, sections repliables", l:[
+    "Une série qui reprend après une pause de saison remonte en « À regarder ensuite » dès la sortie du nouvel épisode, comme dans TV Time. La fraîcheur d'une série est désormais la plus récente de deux dates : ton dernier épisode coché, ou la diffusion du prochain épisode à voir.",
+    "« À regarder ensuite » est triée sur cette même fraîcheur : le dernier épisode sorti ou coché passe en tête.",
+    "Le seuil avant « Pas vues depuis un moment » passe de 30 à 60 jours, pour qu'une courte pause ne vide pas la file.",
+    "« Pas vues depuis un moment » s'arrête à un an : au-delà, la série passe en « Hors file » et quitte le filtre TV Time. Elle reste visible avec « Toutes » ou « En cours ».",
+    "Un appui sur le titre d'une section la replie ou la déplie. L'état est retenu d'une session à l'autre, et une section repliée ne consomme pas la pagination."
+  ]},
   { v:"1.34.1", d:"2026-10-17", t:"Filtre TV Time", l:[
     "Nouveau filtre « TV Time » dans la rangée du haut de Séries, juste après « Toutes ».",
     "Il ne garde que ce qu'affichait la liste de TV Time : À regarder ensuite, Pas commencées et Pas vues depuis un moment.",
@@ -2160,7 +2167,8 @@ function blocInstall(){
    application TV Time. Rien n'est stocké : tout se déduit des visionnages,
    de la date d'activité et du calendrier de diffusion déjà connus.
    ============================================================ */
-const TT_PAUSE_JOURS = 30;   // au-delà, une série en cours passe en « Pas vues depuis un moment »
+const TT_PAUSE_JOURS = 60;     // au-delà, une série en cours passe en « Pas vues depuis un moment »
+const TT_PLAFOND_JOURS = 365;  // au-delà, elle sort de la file et passe en « Hors file »
 const TT_FILE = ["suite", "nouv", "pause"];   // ce que la liste de TV Time montrait
 const TT_SECTIONS = [
   ["suite", "À regarder ensuite"],
@@ -2170,12 +2178,22 @@ const TT_SECTIONS = [
   ["hors",  "Hors file"],
   ["arch",  "Archivées"]
 ];
+/* Fraîcheur : la plus récente de ta dernière activité et de la diffusion du
+   prochain épisode à voir. Une série à jour qui reprend après une pause de
+   saison redevient ainsi « à regarder ensuite » dès la sortie de l'épisode. */
+function fraicheurTT(sh){
+  const nx = prochainAVoir(sh);
+  const sortie = nx && nx.d ? Date.parse(nx.d + "T12:00:00") : 0;
+  return Math.max(activiteDe(sh), sortie || 0);
+}
 function sectionTT(sh){
   if(sh.archive) return "arch";
   if(sh.userStatus === "dropped") return "hors";
   if(prochainAVoir(sh)){
     if(passe(sh) === 1 && !avancement(sh).watched) return "nouv";
-    return Date.now() - activiteDe(sh) > TT_PAUSE_JOURS * 86400000 ? "pause" : "suite";
+    const age = Date.now() - fraicheurTT(sh);
+    if(age <= TT_PAUSE_JOURS * 86400000) return "suite";
+    return age <= TT_PLAFOND_JOURS * 86400000 ? "pause" : "hors";
   }
   return prochaineDiffusion(sh) ? "venir" : "hors";
 }
@@ -2183,22 +2201,29 @@ function corpsTVTime(l){
   const groupes = new Map(TT_SECTIONS.map(([k]) => [k, []]));
   l.forEach(sh => groupes.get(sectionTT(sh)).push(sh));
   const parNom = (a, b) => a.name.localeCompare(b.name);
-  groupes.get("suite").sort((a, b) => activiteDe(b) - activiteDe(a) || parNom(a, b));
-  groupes.get("pause").sort((a, b) => activiteDe(b) - activiteDe(a) || parNom(a, b));
+  groupes.get("suite").sort((a, b) => fraicheurTT(b) - fraicheurTT(a) || parNom(a, b));
+  groupes.get("pause").sort((a, b) => fraicheurTT(b) - fraicheurTT(a) || parNom(a, b));
   groupes.get("nouv").sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0) || parNom(a, b));
   groupes.get("venir").sort((a, b) =>
     String((prochaineDiffusion(a) || {}).d).localeCompare(String((prochaineDiffusion(b) || {}).d)) || parNom(a, b));
   groupes.get("hors").sort(parNom);
   groupes.get("arch").sort(parNom);
-  // La pagination porte sur l'ensemble, dans l'ordre des sections.
+  // La pagination porte sur l'ensemble, dans l'ordre des sections ; une
+  // section repliée n'en consomme rien.
+  const plies = new Set(DB.settings.ttPlies || []);
   let reste = state.limite;
   return TT_SECTIONS.map(([k, titre]) => {
     const g = groupes.get(k);
-    if(!g.length || reste <= 0) return "";
+    if(!g.length) return "";
+    const plie = plies.has(k);
+    const tete = '<button class="eyebrow" style="margin-top:18px;width:100%;cursor:pointer" data-act="tt-pli" data-id="' + k + '" ' +
+      'aria-expanded="' + !plie + '"><span aria-hidden="true" style="width:10px">' + (plie ? "▸" : "▾") + '</span>' +
+      titre + ' <b>' + g.length + '</b></button>';
+    if(plie) return tete;
+    if(reste <= 0) return "";
     const vus = g.slice(0, reste);
     reste -= vus.length;
-    return '<div class="eyebrow" style="margin-top:18px">' + titre + ' <b>' + g.length + '</b></div>' +
-      '<div class="stack">' + vus.map(carteSerie).join("") + '</div>';
+    return tete + '<div class="stack">' + vus.map(carteSerie).join("") + '</div>';
   }).join("");
 }
 
@@ -2336,12 +2361,16 @@ function vueListe(){
   /* --- corps --- */
   const resteTotal = l.filter(sh => !sh.archive).reduce((x, sh) => x + tempsRestant(sh), 0);
   const vus = l.slice(0, state.limite);
+  // En vue TV Time, les sections repliées ne comptent pas dans la pagination.
+  const pliees = t === "tvtime" ? new Set(DB.settings.ttPlies || []) : null;
+  const nbPagine = pliees ? l.filter(sh => !pliees.has(sectionTT(sh))).length : l.length;
+  const nbVus = Math.min(nbPagine, state.limite);
   const corps = l.length
     ? (t === "tvtime" ? corpsTVTime(l) : '<div class="stack">' + vus.map(carteSerie).join("") + '</div>') +
-      (l.length > vus.length
+      (nbPagine > nbVus
         ? '<button class="btn full" style="margin-top:12px" data-act="plus">Afficher ' +
-          Math.min(PAGE, l.length - vus.length) + ' séries de plus <span class="mono" style="color:var(--gris)">(' +
-          vus.length + '/' + l.length + ')</span></button>' : "")
+          Math.min(PAGE, nbPagine - nbVus) + ' séries de plus <span class="mono" style="color:var(--gris)">(' +
+          nbVus + '/' + nbPagine + ')</span></button>' : "")
     : '<div class="empty"><h3>Aucun résultat</h3><p>Aucune série ne correspond à ces critères.</p>' +
       (actifs || q ? '<button class="btn" data-act="reset-filtres">Retirer les filtres</button>' : "") + '</div>';
 
@@ -4054,6 +4083,11 @@ document.addEventListener("click", async ev => {
   }
   if(act === "vider-ql"){ state.ql = ""; state.limite = PAGE; render(); return; }
   if(act === "plus"){ state.limite += PAGE; render(); return; }
+  if(act === "tt-pli"){
+    const p = new Set(DB.settings.ttPlies || []);
+    p.has(id) ? p.delete(id) : p.add(id);
+    DB.settings.ttPlies = [...p]; sauver(); render(); return;
+  }
 
   if(act === "open"){ ouvrirFiche(+id); return; }
   if(act === "open-f"){ ouvrirFicheFilm(id); return; }
