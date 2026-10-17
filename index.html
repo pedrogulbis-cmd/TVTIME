@@ -462,9 +462,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.33.1";
+const VERSION = "1.34.0";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.34.0", d:"2026-10-17", t:"Vue TV Time", l:[
+    "Nouveau choix « TV Time » dans la rangée de tris de Séries : la liste se range en sections, comme l'ancienne application.",
+    "À regarder ensuite : les séries en cours avec un épisode disponible, la dernière cochée en tête.",
+    "Puis Pas commencées, Pas vues depuis un moment (aucun épisode coché depuis 30 jours), À venir (séries à jour, triées par prochaine diffusion), Hors file et Archivées.",
+    "Les filtres, la recherche par titre et le panneau de facettes s'appliquent avant le rangement, comme pour les autres tris.",
+    "Aucune donnée nouvelle : les sections sont calculées à partir de ce qui est déjà enregistré. Le schéma ne change pas, et revenir à un autre tri rend la liste habituelle."
+  ]},
   { v:"1.33.1", d:"2026-08-27", t:"Archiver plutôt que supprimer", l:[
     "Dans les listes, le raccourci corbeille cède sa place à l'archivage, d'un usage bien plus fréquent.",
     "Retirer une série ou un film reste possible depuis leur fiche, où la décision se prend en connaissance de cause.",
@@ -877,6 +884,8 @@ const DICO = {
   "Reste à voir":"Left to watch", "Peu importe":"Any", "En production":"In production",
   "Terminée":"Ended", "Moins de 2 h":"Under 2h", "2 à 5 h":"2 to 5h", "5 à 15 h":"5 to 15h",
   "Plus de 15 h":"Over 15h", "Filtrer par titre…":"Filter by title…",
+  "TV Time":"TV Time", "À regarder ensuite":"Watch next", "Pas commencées":"Not started",
+  "Pas vues depuis un moment":"Not watched in a while", "Hors file":"Out of the queue",
   // filtres et tris des films
   "Tous":"All", "Vus":"Watched", "Revus":"Rewatched", "Archivés":"Archived",
   "Sortie":"Release", "Durée":"Runtime",
@@ -2138,6 +2147,53 @@ function blocInstall(){
     '</div>';
 }
 
+/* ============================================================
+   VUE TV TIME
+   Range la liste déjà filtrée en sections, à la manière de l'ancienne
+   application TV Time. Rien n'est stocké : tout se déduit des visionnages,
+   de la date d'activité et du calendrier de diffusion déjà connus.
+   ============================================================ */
+const TT_PAUSE_JOURS = 30;   // au-delà, une série en cours passe en « Pas vues depuis un moment »
+const TT_SECTIONS = [
+  ["suite", "À regarder ensuite"],
+  ["nouv",  "Pas commencées"],
+  ["pause", "Pas vues depuis un moment"],
+  ["venir", "À venir"],
+  ["hors",  "Hors file"],
+  ["arch",  "Archivées"]
+];
+function sectionTT(sh){
+  if(sh.archive) return "arch";
+  if(sh.userStatus === "dropped") return "hors";
+  if(prochainAVoir(sh)){
+    if(passe(sh) === 1 && !avancement(sh).watched) return "nouv";
+    return Date.now() - activiteDe(sh) > TT_PAUSE_JOURS * 86400000 ? "pause" : "suite";
+  }
+  return prochaineDiffusion(sh) ? "venir" : "hors";
+}
+function corpsTVTime(l){
+  const groupes = new Map(TT_SECTIONS.map(([k]) => [k, []]));
+  l.forEach(sh => groupes.get(sectionTT(sh)).push(sh));
+  const parNom = (a, b) => a.name.localeCompare(b.name);
+  groupes.get("suite").sort((a, b) => activiteDe(b) - activiteDe(a) || parNom(a, b));
+  groupes.get("pause").sort((a, b) => activiteDe(b) - activiteDe(a) || parNom(a, b));
+  groupes.get("nouv").sort((a, b) => (b.addedAt || 0) - (a.addedAt || 0) || parNom(a, b));
+  groupes.get("venir").sort((a, b) =>
+    String((prochaineDiffusion(a) || {}).d).localeCompare(String((prochaineDiffusion(b) || {}).d)) || parNom(a, b));
+  groupes.get("hors").sort(parNom);
+  groupes.get("arch").sort(parNom);
+  // La pagination porte sur l'ensemble, dans l'ordre des sections.
+  let reste = state.limite;
+  return TT_SECTIONS.map(([k, titre]) => {
+    const g = groupes.get(k);
+    if(!g.length || reste <= 0) return "";
+    const vus = g.slice(0, reste);
+    reste -= vus.length;
+    return '<div class="eyebrow" style="margin-top:18px">' + titre + ' <b>' + g.length + '</b></div>' +
+      '<div class="stack">' + vus.map(carteSerie).join("") + '</div>';
+  }).join("");
+}
+
 function vueListe(){
   const tout = Object.values(DB.shows);
   if(!tout.length)
@@ -2265,14 +2321,14 @@ function vueListe(){
     '<button class="chip ' + (f === x.id ? "on" : "") + '" data-act="filtre" data-id="' + x.id + '">' + x.l + '</button>').join("") + '</div>';
 
   const tris = '<div class="chips" style="margin-top:6px">' +
-    [["recent","Diffusion"],["activite","Reprise"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
+    [["recent","Diffusion"],["tvtime","TV Time"],["activite","Reprise"],["reste","Plus vite finie"],["long","Plus longue"],["az","A → Z"],["progress","Avancement"],["added","Ajout"]]
       .map(([id, lb]) => '<button class="chip ' + (t === id ? "on" : "") + '" data-act="tri" data-id="' + id + '">' + lb + '</button>').join("") + '</div>';
 
   /* --- corps --- */
   const resteTotal = l.filter(sh => !sh.archive).reduce((x, sh) => x + tempsRestant(sh), 0);
   const vus = l.slice(0, state.limite);
   const corps = l.length
-    ? '<div class="stack">' + vus.map(carteSerie).join("") + '</div>' +
+    ? (t === "tvtime" ? corpsTVTime(l) : '<div class="stack">' + vus.map(carteSerie).join("") + '</div>') +
       (l.length > vus.length
         ? '<button class="btn full" style="margin-top:12px" data-act="plus">Afficher ' +
           Math.min(PAGE, l.length - vus.length) + ' séries de plus <span class="mono" style="color:var(--gris)">(' +
