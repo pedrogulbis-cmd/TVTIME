@@ -462,9 +462,16 @@ const LS  = "antenne.v1";
               le format change et qu'une migration est nécessaire.
    Pour publier une version : incrémente VERSION et ajoute une entrée
    en tête de JOURNAL. Rien d'autre à toucher.                        */
-const VERSION = "1.34.0";
+const VERSION = "1.34.1";
 const SCHEMA  = 4;
 const JOURNAL = [
+  { v:"1.34.1", d:"2026-10-17", t:"Filtre TV Time", l:[
+    "Nouveau filtre « TV Time » dans la rangée du haut de Séries, juste après « Toutes ».",
+    "Il ne garde que ce qu'affichait la liste de TV Time : À regarder ensuite, Pas commencées et Pas vues depuis un moment.",
+    "Les séries à jour restent dans l'Agenda ; les terminées, abandonnées et archivées sont écartées.",
+    "Il se combine avec n'importe quel tri : avec le tri TV Time on retrouve l'ancienne application à l'identique, avec « Toutes » la vue complète reste disponible.",
+    "Comme les autres filtres, le choix est retenu d'une session à l'autre."
+  ]},
   { v:"1.34.0", d:"2026-10-17", t:"Vue TV Time", l:[
     "Nouveau choix « TV Time » dans la rangée de tris de Séries : la liste se range en sections, comme l'ancienne application.",
     "À regarder ensuite : les séries en cours avec un épisode disponible, la dernière cochée en tête.",
@@ -2126,7 +2133,7 @@ function listeASuivre(){
 }
 /* ---------- vue : Ma liste ---------- */
 const FILTRES = [
-  { id:"all", l:"Toutes" }, { id:"fav", l:"Favoris" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
+  { id:"all", l:"Toutes" }, { id:"tvtime", l:"TV Time" }, { id:"fav", l:"Favoris" }, { id:"watching", l:"En cours" }, { id:"rewatch", l:"Revisionnage" }, { id:"late", l:"En retard" },
   { id:"uptodate", l:"À jour" }, { id:"completed", l:"Terminées" },
   { id:"planned", l:"À voir" }, { id:"dropped", l:"Abandonnées" }, { id:"archived", l:"Archivées" }
 ];
@@ -2154,6 +2161,7 @@ function blocInstall(){
    de la date d'activité et du calendrier de diffusion déjà connus.
    ============================================================ */
 const TT_PAUSE_JOURS = 30;   // au-delà, une série en cours passe en « Pas vues depuis un moment »
+const TT_FILE = ["suite", "nouv", "pause"];   // ce que la liste de TV Time montrait
 const TT_SECTIONS = [
   ["suite", "À regarder ensuite"],
   ["nouv",  "Pas commencées"],
@@ -2212,6 +2220,7 @@ function vueListe(){
   }else{
     if(f !== "all") l = l.filter(sh => !sh.archive);
     if(f === "fav")           l = l.filter(sh => sh.favorite);
+    else if(f === "tvtime")   l = l.filter(sh => TT_FILE.includes(sectionTT(sh)));
     else if(f === "rewatch")  l = l.filter(sh => passe(sh) > 1);
     else if(f === "late")     l = l.filter(sh => sh.userStatus !== "dropped" && prochainAVoir(sh));
     else if(f === "uptodate") l = l.filter(sh => sh.userStatus !== "dropped" && !prochainAVoir(sh) && avancement(sh).watched > 0);
